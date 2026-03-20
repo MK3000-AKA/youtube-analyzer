@@ -1,5 +1,15 @@
 # YouTube Analyzer 更新日志
 
+## v1.1.1 - 2026-03-20 📝 文档更新
+
+### 改进内容
+- ✅ 完善 README.md 触发关键词列表
+- ✅ 添加中英文触发词对照表（中文/English）
+- ✅ 补充 SKILL.md 自然语言触发示例
+- ✅ 添加 pip install 支持 (setup.py)
+
+---
+
 ## v1.1.0 - 2026-03-20 🎯 重大架构更新
 
 ### 🏗️ 核心改进：整合 YouTube API Skill
