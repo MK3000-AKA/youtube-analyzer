@@ -1,7 +1,11 @@
 #!/usr/bin/env python3
 """
-YouTube Video Analyzer - 9模块标准报告生成器 (修复版)
+YouTube Video Analyzer - 9模块标准报告生成器 v1.0.1
 完整实现所有9模块，包括互动率环形图、评论主题分布等
+
+版本: 1.0.1
+作者: MK3000-AKA
+仓库: https://github.com/MK3000-AKA/youtube-analyzer
 """
 
 import os
@@ -718,6 +722,7 @@ def main():
     
     print("💬 获取评论数据...")
     comments = fetch_comments(video_id, api_key)
+    print(f"   获取到 {len(comments)} 条评论")  # 调试输出
     
     REPORTS_DIR.mkdir(parents=True, exist_ok=True)
     output_path = REPORTS_DIR / f"youtube_analysis_{video_id}_{datetime.now().strftime('%Y%m%d')}.html"
