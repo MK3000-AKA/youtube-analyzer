@@ -108,10 +108,21 @@ python youtube_analyzer.py "https://www.youtube.com/watch?v=VIDEO_ID"
 
 ### As OpenClaw Skill
 
-Trigger phrases:
-- "分析YouTube视频"
-- "生成YouTube报告"
-- "YouTube视频深度分析"
+**触发关键词 / Trigger Phrases:**
+
+| 中文 | English |
+|------|---------|
+| 分析YouTube视频 | analyze youtube video |
+| 生成YouTube报告 | generate youtube report |
+| YouTube视频深度分析 | youtube video analysis |
+| 分析YouTube | analyze youtube |
+| 获取YouTube评论 | get youtube comments |
+| YouTube视频分析 | youtube analysis |
+
+**示例指令 / Example Commands:**
+- "分析YouTube视频 CxErCGVo-oo"
+- "生成YouTube报告 https://www.youtube.com/watch?v=dQw4w9WgXcQ"
+- "analyze youtube video VIDEO_ID"
 
 ## Output
 

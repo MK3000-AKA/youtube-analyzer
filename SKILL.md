@@ -49,12 +49,25 @@ metadata:
 
 用户可以通过以下方式触发本 Skill：
 
-```
+**中文指令：**
 - "分析YouTube视频 [VIDEO_ID]"
 - "生成YouTube视频报告 [URL]"
 - "YouTube视频深度分析 [视频链接]"
 - "分析这个YouTube视频"
-```
+- "获取YouTube评论分析"
+- "YouTube视频分析报告"
+
+**English Commands:**
+- "analyze youtube video [VIDEO_ID]"
+- "generate youtube report [URL]"
+- "youtube video analysis [link]"
+- "analyze this youtube video"
+- "get youtube comments analysis"
+
+**自然语言触发：**
+- "帮我分析一下这个YouTube视频"
+- "看看这个YouTube视频的反馈怎么样"
+- "分析一下YouTube上的用户评论"
 
 ## 执行步骤
 
