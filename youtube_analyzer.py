@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
 """
 YouTube Video Analyzer Pro - 专业级9模块报告生成器
-完全匹配用户提供的专业模板标准
+基于真实字幕分析和AI内容理解
+支持HTTP API服务器模式，用于接收AI分析结果
 """
 
 import os
@@ -9,8 +10,13 @@ import sys
 import json
 import re
 import ssl
-from datetime import datetime, timezone
+import subprocess
+import tempfile
+import threading
+import time
+from datetime import datetime
 from pathlib import Path
+from http.server import HTTPServer, BaseHTTPRequestHandler
 import urllib.request
 import urllib.parse
 
@@ -19,6 +25,8 @@ ssl._create_default_https_context = ssl._create_unverified_context
 
 # 配置
 REPORTS_DIR = Path.home() / ".openclaw" / "workspace" / "reports" / "youtube-analysis"
+AI_RESULTS = {}  # 存储AI分析结果
+AI_SERVER_PORT = 0  # 动态分配端口
 
 def get_api_key():
     """从zshrc读取API Key"""
@@ -32,49 +40,374 @@ def get_api_key():
                     return match.group(1)
     return os.environ.get('MATON_API_KEY', '')
 
-def fetch_video_data(video_id, api_key):
-    """获取YouTube视频数据"""
-    url = f"https://gateway.maton.ai/youtube/youtube/v3/videos?part=snippet,statistics,contentDetails&id={video_id}"
-    req = urllib.request.Request(url)
-    req.add_header('Authorization', f'Bearer {api_key}')
-    
-    with urllib.request.urlopen(req, timeout=30) as response:
-        data = json.loads(response.read().decode('utf-8'))
-        return data.get('items', [{}])[0] if data.get('items') else None
+# ==================== HTTP API服务器 ====================
 
-def fetch_comments(video_id, api_key, max_results=100):
-    """获取视频评论（包含回复数）"""
-    url = f"https://gateway.maton.ai/youtube/youtube/v3/commentThreads?part=snippet,replies&videoId={video_id}&maxResults={max_results}&order=relevance"
-    req = urllib.request.Request(url)
-    req.add_header('Authorization', f'Bearer {api_key}')
+class AIRequestHandler(BaseHTTPRequestHandler):
+    """处理AI分析请求的HTTP处理器"""
     
+    def log_message(self, format, *args):
+        """静默日志"""
+        pass
+    
+    def do_POST(self):
+        """处理POST请求 - 接收AI分析结果"""
+        global AI_RESULTS
+        
+        if self.path == '/api/ai/analyze':
+            content_length = int(self.headers.get('Content-Length', 0))
+            post_data = self.rfile.read(content_length).decode('utf-8')
+            
+            try:
+                data = json.loads(post_data)
+                task_id = data.get('task_id')
+                result = data.get('result')
+                
+                if task_id and result:
+                    AI_RESULTS[task_id] = result
+                    self.send_response(200)
+                    self.send_header('Content-Type', 'application/json')
+                    self.end_headers()
+                    self.wfile.write(json.dumps({"status": "ok"}).encode())
+                    return
+            except:
+                pass
+            
+            self.send_response(400)
+            self.end_headers()
+        
+        elif self.path == '/api/ai/request':
+            """接收AI分析请求"""
+            content_length = int(self.headers.get('Content-Length', 0))
+            post_data = self.rfile.read(content_length).decode('utf-8')
+            
+            try:
+                data = json.loads(post_data)
+                task_type = data.get('type')
+                content = data.get('content')
+                
+                if task_type == 'content_analysis':
+                    result = analyze_with_external_ai('content', content)
+                elif task_type == 'translation':
+                    result = analyze_with_external_ai('translation', content)
+                else:
+                    result = None
+                
+                self.send_response(200)
+                self.send_header('Content-Type', 'application/json')
+                self.end_headers()
+                self.wfile.write(json.dumps({"result": result}).encode())
+                return
+                
+            except Exception as e:
+                self.send_response(500)
+                self.end_headers()
+                self.wfile.write(json.dumps({"error": str(e)}).encode())
+        
+        else:
+            self.send_response(404)
+            self.end_headers()
+    
+    def do_GET(self):
+        """处理GET请求 - 检查任务状态"""
+        global AI_RESULTS
+        
+        if self.path.startswith('/api/ai/result/'):
+            task_id = self.path.split('/')[-1]
+            if task_id in AI_RESULTS:
+                self.send_response(200)
+                self.send_header('Content-Type', 'application/json')
+                self.end_headers()
+                self.wfile.write(json.dumps({
+                    "status": "completed",
+                    "result": AI_RESULTS[task_id]
+                }).encode())
+                # 清理结果
+                del AI_RESULTS[task_id]
+            else:
+                self.send_response(202)
+                self.send_header('Content-Type', 'application/json')
+                self.end_headers()
+                self.wfile.write(json.dumps({"status": "pending"}).encode())
+        else:
+            self.send_response(404)
+            self.end_headers()
+
+def start_ai_server():
+    """启动AI分析服务器"""
+    global AI_SERVER_PORT
+    
+    # 尝试多个端口
+    for port in range(18080, 18100):
+        try:
+            server = HTTPServer(('127.0.0.1', port), AIRequestHandler)
+            AI_SERVER_PORT = port
+            
+            def run_server():
+                server.serve_forever()
+            
+            thread = threading.Thread(target=run_server, daemon=True)
+            thread.start()
+            
+            # 保存端口到文件，方便外部调用
+            port_file = Path.home() / '.openclaw' / '.youtube_analyzer_port'
+            port_file.write_text(str(port))
+            
+            return port
+        except:
+            continue
+    
+    return 0
+
+def analyze_with_external_ai(analysis_type, content):
+    """
+    通过外部AI进行分析
+    尝试多种方式调用Kimi
+    """
+    # 方式1: 尝试通过环境变量获取结果
+    task_id = f"{analysis_type}_{hash(content) % 10000}_{int(time.time())}"
+    
+    # 方式2: 通过临时文件机制
+    task_file = Path.home() / '.openclaw' / '.ai_tasks' / f'{task_id}.json'
+    task_file.parent.mkdir(parents=True, exist_ok=True)
+    
+    task_data = {
+        'type': analysis_type,
+        'content': content,
+        'status': 'pending',
+        'created_at': datetime.now().isoformat()
+    }
+    task_file.write_text(json.dumps(task_data))
+    
+    # 方式3: 通过网关API直接调用（如果可用）
     try:
-        with urllib.request.urlopen(req, timeout=30) as response:
-            data = json.loads(response.read().decode('utf-8'))
-            return data.get('items', [])
+        gateway_url = os.environ.get('OPENCLAW_GATEWAY_URL', 'http://127.0.0.1:8080')
+        
+        prompt_map = {
+            'content': """分析以下视频字幕，生成专业视频摘要：
+【视频简介】概述
+【分段重点】1. 2. 3.
+【核心特性】-
+字幕：""",
+            'translation': "翻译成自然流畅的中文："
+        }
+        
+        req = urllib.request.Request(
+            f"{gateway_url}/v1/chat/completions",
+            data=json.dumps({
+                "model": "kimi-coding/k2p5",
+                "messages": [
+                    {"role": "system", "content": "You are a helpful assistant"},
+                    {"role": "user", "content": prompt_map.get(analysis_type, '') + content[:3000]}
+                ]
+            }).encode('utf-8'),
+            headers={"Content-Type": "application/json"},
+            method="POST"
+        )
+        
+        with urllib.request.urlopen(req, timeout=120) as resp:
+            data = json.loads(resp.read().decode())
+            result = data['choices'][0]['message']['content']
+            
+            # 更新任务状态
+            task_data['status'] = 'completed'
+            task_data['result'] = result
+            task_file.write_text(json.dumps(task_data))
+            
+            return result
+            
     except Exception as e:
-        print(f"⚠️ 获取评论失败: {e}")
-        return []
+        print(f"⚠️ 网关API调用失败: {e}")
+    
+    # 方式4: 等待外部处理（通过文件轮询）
+    result_file = task_file.with_suffix('.result')
+    for _ in range(60):  # 最多等待5分钟
+        if result_file.exists():
+            result = result_file.read_text()
+            result_file.unlink()
+            task_file.unlink()
+            return result
+        time.sleep(5)
+    
+    # 超时，返回默认值
+    task_file.unlink()
+    return None
+
+def extract_subtitle(video_id):
+    """使用 yt-dlp 提取YouTube视频字幕"""
+    print("🎬 正在提取视频字幕...")
+    
+    with tempfile.TemporaryDirectory() as tmpdir:
+        cmd = [
+            "yt-dlp",
+            "--skip-download",
+            "--write-subs",
+            "--write-auto-subs",
+            "--sub-lang", "en",
+            "--sub-format", "json3",
+            "-o", os.path.join(tmpdir, "subtitle"),
+            f"https://youtube.com/watch?v={video_id}"
+        ]
+        
+        try:
+            result = subprocess.run(cmd, capture_output=True, text=True, timeout=120)
+            
+            subtitle_files = list(Path(tmpdir).glob("subtitle*.json3"))
+            if subtitle_files:
+                with open(subtitle_files[0], 'r', encoding='utf-8') as f:
+                    subtitle_data = json.load(f)
+                
+                events = subtitle_data.get('events', [])
+                full_text = []
+                for event in events:
+                    if 'segs' in event:
+                        text_parts = [seg.get('utf8', '') for seg in event.get('segs', [])]
+                        full_text.append(''.join(text_parts))
+                
+                subtitle_text = ' '.join(full_text)
+                if subtitle_text.strip():
+                    print(f"✅ 成功提取字幕，共 {len(subtitle_text)} 字符")
+                    return subtitle_text[:15000]
+            
+            print("⚠️ 未找到YouTube字幕")
+            return None
+            
+        except Exception as e:
+            print(f"⚠️ 字幕提取失败: {e}")
+            return None
+
+def analyze_content_with_ai(subtitle_text):
+    """使用外部AI分析字幕内容"""
+    print("🤖 正在分析视频内容...")
+    
+    prompt = """你是一位专业的视频内容分析师。请分析以下YouTube视频字幕，提取关键信息。
+
+请按以下格式输出：
+
+【视频简介】（100字以内的视频内容概述）
+
+【分段重点】
+1. [时间段/主题] - 要点内容
+2. [时间段/主题] - 要点内容
+3. [时间段/主题] - 要点内容
+...
+
+【核心特性/要点】
+- 特性1
+- 特性2
+- 特性3
+...
+
+【目标受众】
+简要描述这个视频适合哪些观众
+
+字幕内容："""
+
+    result = analyze_with_external_ai('content', prompt + subtitle_text[:8000])
+    
+    if result:
+        print("✅ 内容分析完成")
+        return parse_ai_analysis(result)
+    else:
+        print("⚠️ AI分析失败，使用默认内容")
+        return get_default_content_summary()
+
+def parse_ai_analysis(response):
+    """解析AI返回的分析结果"""
+    result = {'intro': '', 'sections': [], 'features': [], 'audience': ''}
+    
+    lines = response.split('\n')
+    current_section = None
+    
+    for line in lines:
+        line = line.strip()
+        if not line:
+            continue
+        
+        if '【视频简介】' in line:
+            current_section = 'intro'
+            continue
+        elif '【分段重点】' in line:
+            current_section = 'sections'
+            continue
+        elif '【核心特性' in line or '【核心要点】' in line:
+            current_section = 'features'
+            continue
+        elif '【目标受众】' in line:
+            current_section = 'audience'
+            continue
+        
+        if current_section == 'intro' and not result['intro'] and len(line) > 20:
+            result['intro'] = line
+        elif current_section == 'sections':
+            if re.match(r'^\d+\.', line) or line.startswith('-') or line.startswith('•'):
+                clean_line = re.sub(r'^[\d\-\•\.\[\]]+\s*', '', line)
+                if len(clean_line) > 10:
+                    result['sections'].append(clean_line[:150])
+        elif current_section == 'features':
+            if line.startswith('-') or line.startswith('•') or re.match(r'^\d+\.', line):
+                clean_line = re.sub(r'^[\d\-\•\.]+\s*', '', line)
+                if len(clean_line) > 5:
+                    result['features'].append(clean_line[:120])
+        elif current_section == 'audience':
+            result['audience'] = line
+    
+    if not result['intro']:
+        result['intro'] = '本视频提供专业的技术讲解和实用指导。'
+    if not result['features']:
+        result['features'] = [
+            "视频提供了详细的技术讲解和操作指导",
+            "包含实际应用场景和最佳实践建议",
+            "适合不同经验水平的爱好者观看学习"
+        ]
+    
+    return result
+
+def get_default_content_summary():
+    """获取默认内容摘要"""
+    return {
+        'intro': '本视频提供专业的技术讲解和实用指导。',
+        'sections': [
+            "视频开场介绍产品背景和主要功能",
+            "详细讲解核心技术和使用方法",
+            "展示实际应用案例和效果演示",
+            "总结优缺点并给出购买建议"
+        ],
+        'features': [
+            "视频提供了详细的技术讲解和操作指导",
+            "包含实际应用场景和最佳实践建议",
+            "适合不同经验水平的爱好者观看学习"
+        ],
+        'audience': '技术爱好者和相关领域从业者'
+    }
+
+def translate_comment_with_ai(comment_text):
+    """使用AI翻译评论"""
+    if not comment_text or len(comment_text) < 5:
+        return None
+    
+    prompt = "请将以下YouTube英文评论翻译成自然流畅的中文。只需要输出翻译结果：\n\n"
+    
+    result = analyze_with_external_ai('translation', prompt + comment_text[:500])
+    
+    if result:
+        return result.strip().strip('"').strip("'")
+    return None
+
+# ==================== 其他功能函数 ====================
 
 def analyze_sentiment(text):
-    """增强情感分析"""
+    """情感分析"""
     text_lower = text.lower()
-    
     positive_words = ['good', 'great', 'awesome', 'love', 'best', 'excellent', 'amazing', 'thanks', 
-                      'helpful', 'perfect', 'nice', 'cool', 'like', 'useful', 'fantastic', 'wonderful',
-                      'brilliant', 'outstanding', 'superb', 'incredible', 'impressive', 'solid',
-                      'appreciate', 'grateful', 'thank', 'bless', 'goat', 'gigachad', 'legend']
-    
+                      'helpful', 'perfect', 'nice', 'cool', 'like', 'useful', 'fantastic', 'wonderful']
     negative_words = ['bad', 'terrible', 'worst', 'hate', 'sucks', 'awful', 'useless', 'broken', 
-                      'problem', 'issue', 'error', 'fail', 'wrong', 'disappointing', 'trash',
-                      'garbage', 'waste', 'horrible', 'pathetic', 'sad', 'annoying', 'frustrating']
+                      'problem', 'issue', 'error', 'fail', 'wrong', 'disappointing']
     
     pos_count = sum(1 for w in positive_words if w in text_lower)
     neg_count = sum(1 for w in negative_words if w in text_lower)
     
-    # 考虑表情符号
-    positive_emojis = ['😊', '😄', '👍', '❤️', '🔥', '💯', '🙏', '👏', '🎉', '✨', '🥰', '😍']
-    negative_emojis = ['😠', '😡', '👎', '💔', '😢', '😭', '😤', '😒', '🙄', '🤬']
+    positive_emojis = ['😊', '😄', '👍', '❤️', '🔥', '💯', '🙏', '👏', '🎉', '✨']
+    negative_emojis = ['😠', '😡', '👎', '💔', '😢', '😭', '😤', '😒', '🙄']
     
     for emoji in positive_emojis:
         if emoji in text:
@@ -91,11 +424,10 @@ def analyze_sentiment(text):
         return 'neutral'
 
 def determine_badges(comment_text):
-    """确定评论徽章（支持多个）"""
+    """确定评论徽章"""
     text_lower = comment_text.lower()
     badges = []
     
-    # 情感判断
     sentiment = analyze_sentiment(comment_text)
     if sentiment == 'positive':
         badges.append(('badge-positive', '😊 正面'))
@@ -104,241 +436,115 @@ def determine_badges(comment_text):
     else:
         badges.append(('badge-neutral', '😐 中立'))
     
-    # 技术相关
-    tech_words = ['code', 'programming', 'api', 'function', 'script', 'error', 'bug', 'fix', 
-                  'setup', 'config', 'install', 'firmware', 'version', 'compatible', 'upgrade',
-                  'spi', 'elrs', 'betaflight', 'module', 'receiver', 'transmitter']
+    tech_words = ['firmware', 'version', 'compatible', 'upgrade', 'config', 'elrs', 'betaflight']
     if any(w in text_lower for w in tech_words):
         badges.append(('badge-technical', '🔧 技术'))
     
-    # 幽默/玩笑
-    humor_words = ['😂', '🤣', 'lol', 'haha', 'funny', 'joke', 'humor']
+    humor_words = ['😂', '🤣', 'lol', 'haha', 'funny']
     if any(w in text_lower for w in humor_words):
         badges.append(('badge-neutral', '😄 幽默'))
     
     return badges
 
-def translate_to_chinese(text):
-    """简单的英文到中文翻译映射（用于评论）"""
-    # 常见短语的简单映射
-    translations = {
-        'thanks': '感谢',
-        'thank you': '谢谢你',
-        'great video': '很棒的视频',
-        'awesome': '太棒了',
-        'love this': '喜欢这个',
-        'helpful': '有帮助的',
-        'very good': '非常好',
-        'nice': '不错',
-        'cool': '酷',
-        'amazing': '令人惊叹',
-        'perfect': '完美',
-        'exactly': '正是如此',
-        'totally agree': '完全同意',
-        'well explained': '解释得很好',
-        'makes sense': '有道理',
-    }
-    
-    # 返回原文加简单翻译提示
-    return f"（{text[:50]}... 的中文大意）"
-
 def extract_keywords(comments, top_n=20):
-    """提取高频关键词（增强版）"""
+    """提取高频关键词"""
     word_freq = {}
-    
-    # FPV/无人机相关关键词权重
-    important_words = {'elrs': 3, 'expresslrs': 3, 'dji': 2, 'fpv': 2, 'drone': 2, 'quad': 2,
-                       'betaflight': 2, 'upgrade': 2, 'firmware': 2, 'video': 1, 'good': 1,
-                       'thanks': 1, 'helpful': 1, 'awesome': 1, 'great': 1, 'love': 1}
-    
-    stop_words = {'the', 'and', 'for', 'are', 'but', 'not', 'you', 'all', 'can', 'had', 'her', 
-                  'was', 'one', 'our', 'out', 'day', 'get', 'has', 'him', 'his', 'how', 'its', 
-                  'may', 'new', 'now', 'old', 'see', 'two', 'who', 'boy', 'did', 'she', 'use', 
-                  'way', 'many', 'oil', 'sit', 'set', 'run', 'eat', 'far', 'sea', 'eye', 'ask', 
-                  'own', 'say', 'too', 'any', 'try', 'let', 'put', 'end', 'why', 'turn', 'here', 
-                  'show', 'every', 'would', 'there', 'their', 'what', 'said', 'have', 'each', 
-                  'which', 'will', 'about', 'could', 'other', 'after', 'first', 'never', 'these', 
-                  'think', 'where', 'being', 'might', 'shall', 'still', 'those', 'while', 'this', 
-                  'that', 'with', 'from', 'they', 'know', 'want', 'been', 'were', 'said', 'time', 
-                  'than', 'them', 'into', 'just', 'like', 'over', 'also', 'back', 'only', 'come', 
-                  'make', 'well', 'work', 'even', 'more', 'most', 'very', 'when', 'much', 'some'}
+    important_words = {'elrs': 3, 'dji': 2, 'fpv': 2, 'drone': 2, 'quad': 2,
+                       'betaflight': 2, 'upgrade': 2, 'firmware': 2, 'video': 1}
+    stop_words = {'the', 'and', 'for', 'are', 'but', 'not', 'you', 'all', 'can', 'had'}
     
     for comment in comments:
         text = comment.get('snippet', {}).get('topLevelComment', {}).get('snippet', {}).get('textDisplay', '')
-        words = re.findall(r'\b[a-zA-Z]{3,}\b', text.lower())
+        words = re.findall(r'\b[a-zA-Z]{4,}\b', text.lower())
         for word in words:
             if word not in stop_words and not word.isdigit():
                 weight = important_words.get(word, 1)
                 word_freq[word] = word_freq.get(word, 0) + weight
     
-    sorted_words = sorted(word_freq.items(), key=lambda x: x[1], reverse=True)
-    return sorted_words[:top_n]
+    return sorted(word_freq.items(), key=lambda x: x[1], reverse=True)[:top_n]
 
-def generate_professional_topics(comments, video_title, channel):
-    """生成专业级评论主题分布"""
-    
-    # 分析评论内容确定主题
+def generate_topics(comments, video_title, channel):
+    """生成评论主题分布"""
     topics_data = {
-        '对创作者的感谢与赞扬': {'count': 0, 'icon': '🙏', 'desc': ''},
-        '产品/技术讨论': {'count': 0, 'icon': '🔧', 'desc': ''},
-        '使用经验分享': {'count': 0, 'icon': '💡', 'desc': ''},
-        '问题求助与解答': {'count': 0, 'icon': '❓', 'desc': ''},
-        '新功能期待': {'count': 0, 'icon': '✨', 'desc': ''},
-        '注意事项提醒': {'count': 0, 'icon': '⚠️', 'desc': ''}
+        '对创作者的感谢与赞扬': {'count': 0, 'icon': '🙏', 'desc': f'大量用户称赞 {channel} 的视频质量和解释能力。'},
+        '产品/技术讨论': {'count': 0, 'icon': '🔧', 'desc': f'用户讨论技术细节和配置问题。'},
+        '使用经验分享': {'count': 0, 'icon': '💡', 'desc': '有经验的用户分享实际使用心得。'},
+        '问题求助与解答': {'count': 0, 'icon': '❓', 'desc': '用户在评论区寻求帮助，形成互助氛围。'},
+        '新功能期待': {'count': 0, 'icon': '✨', 'desc': '用户对新功能表现出兴趣。'},
+        '注意事项提醒': {'count': 0, 'icon': '⚠️', 'desc': '有经验用户提醒注意潜在风险。'}
     }
     
-    # 关键词映射
     keyword_map = {
-        '对创作者的感谢与赞扬': ['thanks', 'thank', 'great', 'awesome', 'appreciate', 'grateful', 'love', 'fantastic', 'helpful', 'goat', 'gigachad', 'legend', 'best'],
-        '产品/技术讨论': ['product', 'elrs', 'firmware', 'version', 'upgrade', 'update', 'compatible', 'betaflight', 'spi', 'module'],
-        '使用经验分享': ['work', 'working', 'tried', 'tested', 'using', 'used', 'experience', 'found', 'discovered'],
-        '问题求助与解答': ['help', 'question', 'how', 'why', 'what', 'issue', 'problem', 'error', 'fix', 'solution'],
-        '新功能期待': ['feature', 'new', 'want', 'wish', 'hope', 'expect', 'looking forward', 'excited'],
-        '注意事项提醒': ['careful', 'caution', 'warning', 'note', 'remember', 'don\'t forget', 'important', 'before']
+        '对创作者的感谢与赞扬': ['thanks', 'thank', 'great', 'awesome', 'appreciate', 'love', 'best'],
+        '产品/技术讨论': ['product', 'elrs', 'firmware', 'version', 'upgrade', 'betaflight'],
+        '使用经验分享': ['work', 'working', 'tried', 'tested', 'using', 'experience'],
+        '问题求助与解答': ['help', 'question', 'how', 'why', 'issue', 'problem'],
+        '新功能期待': ['feature', 'new', 'want', 'wish', 'hope', 'expect'],
+        '注意事项提醒': ['careful', 'caution', 'warning', 'note', 'remember']
     }
     
     for comment in comments:
         text = comment.get('snippet', {}).get('topLevelComment', {}).get('snippet', {}).get('textDisplay', '').lower()
-        matched = False
         for topic, keywords in keyword_map.items():
             if any(kw in text for kw in keywords):
                 topics_data[topic]['count'] += 1
-                matched = True
                 break
-        if not matched:
-            topics_data['产品/技术讨论']['count'] += 1
-    
-    # 计算百分比并生成描述
-    total = sum(t['count'] for t in topics_data.values())
-    
-    descriptions = {
-        '对创作者的感谢与赞扬': f'大量用户称赞 {channel} 的视频质量和解释能力，感谢其多年来对社区的贡献。',
-        '产品/技术讨论': f'用户分享{video_title[:30]}...相关产品的使用经验，讨论技术细节和配置问题。',
-        '使用经验分享': '有经验的用户分享实际使用心得，包括成功案例和遇到的问题解决方案。',
-        '问题求助与解答': '部分用户遇到使用问题，在评论区寻求帮助，形成互助氛围。',
-        '新功能期待': '用户对视频介绍的新功能表现出兴趣，讨论潜在应用场景。',
-        '注意事项提醒': '有经验用户提醒其他人注意潜在风险或常见问题，获得广泛认可。'
-    }
     
     result = []
+    total = sum(t['count'] for t in topics_data.values())
     for topic, data in topics_data.items():
         if data['count'] > 0:
             pct = int(data['count'] / total * 100) if total > 0 else 0
-            result.append({
-                'name': topic,
-                'icon': data['icon'],
-                'count': f"约 {pct}% 评论",
-                'desc': descriptions[topic]
-            })
+            result.append({'name': topic, 'icon': data['icon'], 'count': f"约 {pct}% 评论", 'desc': data['desc']})
     
-    # 按数量排序
     result.sort(key=lambda x: int(x['count'].replace('%', '').replace('约 ', '').split()[0]), reverse=True)
     return result[:6]
 
-def generate_professional_insights(comments, video_data, sentiments):
-    """生成专业级核心洞察"""
-    
+def generate_insights(comments, video_data, sentiments):
+    """生成核心洞察"""
     channel = video_data.get('snippet', {}).get('channelTitle', '')
     views = int(video_data.get('statistics', {}).get('viewCount', 0))
     likes = int(video_data.get('statistics', {}).get('likeCount', 0))
     
     insights = []
     
-    # 洞察1: 受众忠诚度
     positive_ratio = sentiments['positive'] / sum(sentiments.values()) * 100 if sum(sentiments.values()) > 0 else 0
-    if positive_ratio > 50:
+    if positive_ratio > 40:
         insights.append({
-            'color': 'green',
-            'icon': '🌟',
-            'title': '高忠诚度受众群体',
-            'text': f'评论区充满对 {channel} 的高度认可，正面评论占比 {positive_ratio:.0f}%。说明该频道已建立起极强的受众信任，内容可信度高。'
+            'color': 'green', 'icon': '🌟', 'title': '高忠诚度受众群体',
+            'text': f'评论区充满对 {channel} 的高度认可，正面评论占比 {positive_ratio:.0f}%。'
         })
     
-    # 洞察2: 技术社区特征
-    tech_count = sum(1 for c in comments[:30] if any(w in c.get('snippet', {}).get('topLevelComment', {}).get('snippet', {}).get('textDisplay', '').lower() 
-                                                    for w in ['elrs', 'firmware', 'betaflight', 'spi', 'config']))
-    if tech_count > 5:
-        insights.append({
-            'color': 'blue',
-            'icon': '🔧',
-            'title': '专业技术社区氛围',
-            'text': '评论中出现大量技术术语和深度讨论，表明受众以有经验的FPV爱好者为主，社区专业度高。'
-        })
-    
-    # 洞察3: 互动健康度
     reply_count = sum(len(c.get('replies', {}).get('comments', [])) for c in comments[:20])
-    if reply_count > 10:
+    if reply_count > 5:
         insights.append({
-            'color': 'green',
-            'icon': '💬',
-            'title': '活跃社区互动',
-            'text': f'评论区内有多条回复讨论，用户之间积极交流，社区自我互助氛围良好。发现 {reply_count} 条二级回复。'
+            'color': 'green', 'icon': '💬', 'title': '活跃社区互动',
+            'text': f'发现 {reply_count} 条二级回复，用户之间积极交流。'
         })
     
-    # 洞察4: 内容时效性
     insights.append({
-        'color': 'blue',
-        'icon': '📈',
-        'title': '内容热度与参与度',
-        'text': f'视频获得 {views:,} 次观看和 {likes:,} 次点赞，点赞率 {(likes/views*100):.1f}%，互动表现{"良好" if likes/views > 0.03 else "一般"}。'
+        'color': 'blue', 'icon': '📈', 'title': '内容热度与参与度',
+        'text': f'视频获得 {views:,} 次观看和 {likes:,} 次点赞，点赞率 {(likes/views*100):.1f}%。'
     })
     
-    # 洞察5: 用户痛点（如果有负面评论）
     negative_ratio = sentiments['negative'] / sum(sentiments.values()) * 100 if sum(sentiments.values()) > 0 else 0
     if negative_ratio > 5:
         insights.append({
-            'color': 'yellow',
-            'icon': '⚠️',
-            'title': '用户顾虑值得关注',
-            'text': f'约 {negative_ratio:.0f}% 的评论表达了担忧或不满，主要集中在兼容性和使用门槛方面，建议创作者关注并回应。'
+            'color': 'yellow', 'icon': '⚠️', 'title': '用户顾虑值得关注',
+            'text': f'约 {negative_ratio:.0f}% 的评论表达了担忧或不满。'
         })
     
-    # 洞察6: 补充
     insights.append({
-        'color': 'blue',
-        'icon': '🎯',
-        'title': '受众画像洞察',
-        'text': '评论语言以英文为主，受众遍布全球。讨论深度表明观众不仅是普通爱好者，很多是深度用户和专业人士。'
+        'color': 'blue', 'icon': '🎯', 'title': '受众画像洞察',
+        'text': '评论语言以英文为主，受众遍布全球。'
     })
     
     return insights
 
-def generate_content_summary(video_data, channel):
-    """生成专业的视频内容摘要"""
-    
-    title = video_data.get('snippet', {}).get('title', '')
-    description = video_data.get('snippet', {}).get('description', '')[:500]
-    
-    # 构建专业介绍
-    intro = f"""本视频由知名FPV技术YouTuber <strong style="color:#fff">{channel}</strong> 制作，详细讲解了 <strong style="color:#fff">{title}</strong> 的相关内容。
-视频面向FPV无人机爱好者群体，提供权威的技术指导和实用建议。"""
-    
-    # 从描述中提取特性（简化版）
-    features = []
-    lines = description.split('\n')[:15]
-    
-    for line in lines:
-        line = line.strip()
-        if line and len(line) > 10 and len(line) < 150:
-            # 检测是否是特性描述
-            if any(marker in line.lower() for marker in ['new', 'feature', 'add', 'support', 'improve', 'fix', 'update', 'enable', 'disable']):
-                # 清理并格式化
-                clean_line = re.sub(r'^[\-\*\•\・]\s*', '', line)
-                if len(clean_line) > 10:
-                    features.append(clean_line[:120])
-    
-    # 如果没有提取到足够特性，使用默认
-    if len(features) < 3:
-        features = [
-            "视频提供了详细的技术讲解和操作指导",
-            "包含实际应用场景和最佳实践建议", 
-            "适合不同经验水平的FPV爱好者观看学习"
-        ]
-    
-    return intro, features[:12]
+# ==================== 主函数 ====================
 
-def generate_html_report(video_data, comments, video_id, output_path):
-    """生成专业级9模块HTML报告"""
+def generate_html_report(video_data, comments, video_id, subtitle_text):
+    """生成9模块HTML报告"""
     
     snippet = video_data.get('snippet', {})
     stats = video_data.get('statistics', {})
@@ -355,144 +561,75 @@ def generate_html_report(video_data, comments, video_id, output_path):
         hours = int(duration_match.group(1) or 0)
         minutes = int(duration_match.group(2) or 0)
         seconds = int(duration_match.group(3) or 0)
-        if hours > 0:
-            duration = f"{hours}小时{minutes}分"
-        else:
-            duration = f"{minutes}分{seconds}秒"
+        duration = f"{hours}小时{minutes}分" if hours > 0 else f"{minutes}分{seconds}秒"
     else:
         duration = "未知"
     
     views = int(stats.get('viewCount', 0))
     likes = int(stats.get('likeCount', 0))
     comments_count = int(stats.get('commentCount', 0))
-    
-    # 计算点赞率
     like_rate = (likes / views * 100) if views > 0 else 0
+    
+    # AI内容分析
+    if subtitle_text:
+        content_data = analyze_content_with_ai(subtitle_text)
+    else:
+        content_data = get_default_content_summary()
     
     # 情感分析
     sentiments = {'positive': 0, 'neutral': 0, 'negative': 0}
-    for comment in comments:
+    for comment in comments[:50]:
         text = comment.get('snippet', {}).get('topLevelComment', {}).get('snippet', {}).get('textDisplay', '')
         sentiment = analyze_sentiment(text)
         sentiments[sentiment] += 1
     
     total_analyzed = sum(sentiments.values())
-    if total_analyzed > 0:
-        pos_pct = sentiments['positive'] / total_analyzed * 100
-        neu_pct = sentiments['neutral'] / total_analyzed * 100
-        neg_pct = sentiments['negative'] / total_analyzed * 100
-    else:
-        pos_pct = neu_pct = neg_pct = 0
+    pos_pct = sentiments['positive'] / total_analyzed * 100 if total_analyzed > 0 else 0
+    neu_pct = sentiments['neutral'] / total_analyzed * 100 if total_analyzed > 0 else 0
+    neg_pct = sentiments['negative'] / total_analyzed * 100 if total_analyzed > 0 else 0
     
     # 互动率评价
     if like_rate >= 5:
         engagement_eval = "互动表现：优秀 🔥"
-        engagement_desc = f"视频获得 {views:,} 次观看，{likes:,} 次点赞，点赞率高达 <strong style=\"color:#fff\">{like_rate:.1f}%</strong>，远超YouTube平均水平（约2-3%）。"
+        engagement_desc = f"视频获得 {views:,} 次观看，{likes:,} 次点赞，点赞率高达 <strong style=\"color:#fff\">{like_rate:.1f}%</strong>，远超YouTube平均水平。"
     elif like_rate >= 3:
         engagement_eval = "互动表现：良好 ✅"
-        engagement_desc = f"视频发布后获得 {views:,} 次观看，{likes:,} 次点赞，点赞率约 <strong style=\"color:#fff\">{like_rate:.1f}%</strong>，高于YouTube平均水平。"
+        engagement_desc = f"视频发布后获得 {views:,} 次观看，{likes:,} 次点赞，点赞率约 <strong style=\"color:#fff\">{like_rate:.1f}%</strong>。"
     else:
         engagement_eval = "互动表现：一般"
-        engagement_desc = f"视频获得 {views:,} 次观看，{likes:,} 次点赞，点赞率约 <strong style=\"color:#fff\">{like_rate:.1f}%</strong>，属于正常水平。"
-    
-    # 生成内容摘要
-    content_intro, features = generate_content_summary(video_data, channel)
+        engagement_desc = f"视频获得 {views:,} 次观看，{likes:,} 次点赞，点赞率约 <strong style=\"color:#fff\">{like_rate:.1f}%</strong>。"
     
     # 生成主题分布
-    topics = generate_professional_topics(comments, title, channel)
+    topics = generate_topics(comments, title, channel)
     
-    # 提取热门评论（带回复数）
+    # 提取热门评论（带AI翻译）
     top_comments = []
-    for i, comment in enumerate(comments[:5]):
+    for comment in comments[:5]:
         snippet_c = comment.get('snippet', {}).get('topLevelComment', {}).get('snippet', {})
         text = snippet_c.get('textDisplay', '')
-        likes = snippet_c.get('likeCount', 0)
+        likes_c = snippet_c.get('likeCount', 0)
         date = snippet_c.get('publishedAt', '')[:10]
         author = snippet_c.get('authorDisplayName', 'Unknown')
+        replies = len(comment.get('replies', {}).get('comments', []))
         
-        # 获取回复数
-        replies = comment.get('replies', {}).get('comments', [])
-        reply_count = len(replies)
+        # AI翻译
+        translation = translate_comment_with_ai(text)
+        if not translation:
+            translation = f"（{text[:50]}... 的中文大意）"
         
         badges = determine_badges(text)
         
         top_comments.append({
-            'author': author,
-            'text': text[:300],
-            'likes': likes,
-            'reply_count': reply_count,
-            'date': date,
-            'badges': badges
+            'author': author, 'text': text, 'likes': likes_c,
+            'reply_count': replies, 'date': date, 'badges': badges,
+            'translation': translation
         })
     
     # 提取关键词
     keywords = extract_keywords(comments)
     
-    # 生成核心洞察
-    insights = generate_professional_insights(comments, video_data, sentiments)
-    
-    # 生成关键词HTML
-    keywords_html = ""
-    for i, (word, count) in enumerate(keywords):
-        level = min(i // 4 + 1, 5)  # kw-1 到 kw-5
-        keywords_html += f'<span class="keyword kw-{level}">{word}</span>'
-    
-    # 生成主题HTML
-    topics_html = ""
-    for topic in topics:
-        topics_html += f"""
-        <div class="topic-card">
-            <div class="t-icon">{topic['icon']}</div>
-            <div class="t-name">{topic['name']}</div>
-            <div class="t-count">{topic['count']}</div>
-            <div class="t-desc">{topic['desc']}</div>
-        </div>
-        """
-    
-    # 生成评论HTML（带中文翻译）
-    comments_html = ""
-    for comment in top_comments:
-        badges_html = ""
-        for badge_class, badge_text in comment['badges']:
-            badges_html += f'<span class="comment-badge {badge_class}">{badge_text}</span>'
-        
-        # 简单的翻译占位
-        translation = translate_to_chinese(comment['text'])
-        
-        reply_badge = f'<span class="comment-badge badge-replies">💬 {comment["reply_count"]}条回复</span>' if comment['reply_count'] > 0 else ''
-        
-        comments_html += f"""
-        <div class="comment-card">
-            <div class="comment-header">
-                <div>
-                    <div class="comment-author">{comment['author']}</div>
-                    <div class="comment-date">{comment['date']}</div>
-                </div>
-            </div>
-            <div class="comment-text">"{comment['text']}"<br><em style="color:#888;font-size:12px;">{translation}</em></div>
-            <div class="comment-footer">
-                <span class="comment-badge badge-likes">👍 {comment['likes']}</span>
-                {reply_badge}
-                {badges_html}
-            </div>
-        </div>
-        """
-    
-    # 生成洞察HTML
-    insights_html = ""
-    for insight in insights:
-        insights_html += f"""
-        <div class="insight-card {insight['color']}">
-            <div class="insight-icon">{insight['icon']}</div>
-            <div class="insight-title">{insight['title']}</div>
-            <div class="insight-text">{insight['text']}</div>
-        </div>
-        """
-    
-    # 生成特性列表HTML
-    features_html = ""
-    for feature in features:
-        features_html += f'<li><strong>▸</strong> {feature}</li>'
+    # 生成洞察
+    insights = generate_insights(comments, video_data, sentiments)
     
     # 生成HTML
     html = f"""<!DOCTYPE html>
@@ -598,7 +735,6 @@ def generate_html_report(video_data, comments, video_id, output_path):
             color: #ccc;
             line-height: 1.5;
         }}
-        .feature-list li strong {{ color: #fff; display: block; margin-bottom: 2px; }}
         
         .engagement-box {{
             background: linear-gradient(135deg, #1a1a2e, #0f3460);
@@ -619,7 +755,6 @@ def generate_html_report(video_data, comments, video_id, output_path):
             align-items: center;
             justify-content: center;
             flex-shrink: 0;
-            position: relative;
         }}
         .eng-circle-inner {{
             width: 76px;
@@ -692,7 +827,6 @@ def generate_html_report(video_data, comments, video_id, output_path):
             border: 1px solid #2a2a2a;
             border-radius: 12px;
             padding: 18px;
-            position: relative;
         }}
         .comment-header {{
             display: flex;
@@ -798,7 +932,6 @@ def generate_html_report(video_data, comments, video_id, output_path):
 
 <div class="container">
 
-    <!-- 1. Stats -->
     <div class="stats-grid">
         <div class="stat-card">
             <div class="stat-icon">👁️</div>
@@ -827,7 +960,6 @@ def generate_html_report(video_data, comments, video_id, output_path):
         </div>
     </div>
 
-    <!-- 2. Engagement -->
     <div class="section">
         <div class="section-title">📈 互动率分析</div>
         <div class="engagement-box">
@@ -844,18 +976,16 @@ def generate_html_report(video_data, comments, video_id, output_path):
         </div>
     </div>
 
-    <!-- 3. Video Content -->
     <div class="section">
         <div class="section-title">🎬 视频内容摘要</div>
         <div class="content-box">
-            <p style="color:#bbb; margin-bottom:16px; font-size:14px; line-height:1.7;">{content_intro}</p>
+            <p style="color:#bbb; margin-bottom:16px; font-size:14px; line-height:1.7;">{content_data['intro']}</p>
             <ul class="feature-list">
-                {features_html}
+                {''.join(f'<li><strong>▸</strong> {f}</li>' for f in content_data['features'])}
             </ul>
         </div>
     </div>
 
-    <!-- 4. Sentiment -->
     <div class="section">
         <div class="section-title">😊 评论情感分析</div>
         <div class="sentiment-bar-wrap">
@@ -894,67 +1024,122 @@ def generate_html_report(video_data, comments, video_id, output_path):
         </div>
     </div>
 
-    <!-- 5. Topics -->
     <div class="section">
         <div class="section-title">🗂️ 评论主题分布</div>
         <div class="topics-grid">
-            {topics_html}
+            {''.join(f'''
+            <div class="topic-card">
+                <div class="t-icon">{t['icon']}</div>
+                <div class="t-name">{t['name']}</div>
+                <div class="t-count">{t['count']}</div>
+                <div class="t-desc">{t['desc']}</div>
+            </div>
+            ''' for t in topics)}
         </div>
     </div>
 
-    <!-- 6. Top Comments -->
     <div class="section">
         <div class="section-title">🏆 热门评论精选</div>
         <div class="comments-list">
-            {comments_html}
+            {''.join(f'''
+            <div class="comment-card">
+                <div class="comment-header">
+                    <div>
+                        <div class="comment-author">{c['author']}</div>
+                        <div class="comment-date">{c['date']}</div>
+                    </div>
+                </div>
+                <div class="comment-text">"{c['text'][:200]}"<br><em style="color:#888;font-size:12px;">（{c['translation']}）</em></div>
+                <div class="comment-footer">
+                    <span class="comment-badge badge-likes">👍 {c['likes']}</span>
+                    {f'<span class="comment-badge badge-replies">💬 {c["reply_count"]}条回复</span>' if c['reply_count'] > 0 else ''}
+                    {''.join(f'<span class="comment-badge {b[0]}">{b[1]}</span>' for b in c['badges'])}
+                </div>
+            </div>
+            ''' for c in top_comments)}
         </div>
     </div>
 
-    <!-- 7. Keywords -->
     <div class="section">
         <div class="section-title">🔑 高频关键词</div>
         <div class="keyword-cloud">
-            {keywords_html}
+            {''.join(f'<span class="keyword kw-{min(i//4+1,5)}">{w[0]}</span>' for i, w in enumerate(keywords))}
         </div>
     </div>
 
-    <!-- 8. Insights -->
     <div class="section">
         <div class="section-title">💡 核心洞察</div>
         <div class="insights-grid">
-            {insights_html}
+            {''.join(f'''
+            <div class="insight-card {i['color']}">
+                <div class="insight-icon">{i['icon']}</div>
+                <div class="insight-title">{i['title']}</div>
+                <div class="insight-text">{i['text']}</div>
+            </div>
+            ''' for i in insights)}
         </div>
     </div>
 
 </div>
 
 <div class="footer">
-    <p>分析报告生成于 {datetime.now().strftime('%Y年%m月%d日')} · 数据来源：YouTube Data API v3</p>
+    <p>分析报告生成于 {datetime.now().strftime('%Y年%m月%d日')} · 数据来源：YouTube Data API v3 · AI辅助分析</p>
     <p style="margin-top:6px;">视频：<a href="https://youtube.com/watch?v={video_id}" target="_blank">https://youtube.com/watch?v={video_id}</a></p>
 </div>
 
 </body>
 </html>"""
     
-    # 保存报告
-    REPORTS_DIR.mkdir(parents=True, exist_ok=True)
-    with open(output_path, 'w', encoding='utf-8') as f:
-        f.write(html)
+    return html
+
+def fetch_video_data(video_id, api_key):
+    """获取YouTube视频数据"""
+    url = f"https://gateway.maton.ai/youtube/youtube/v3/videos?part=snippet,statistics,contentDetails&id={video_id}"
+    req = urllib.request.Request(url)
+    req.add_header('Authorization', f'Bearer {api_key}')
     
-    return output_path
+    with urllib.request.urlopen(req, timeout=30) as response:
+        data = json.loads(response.read().decode('utf-8'))
+        return data.get('items', [{}])[0] if data.get('items') else None
+
+def fetch_comments(video_id, api_key, max_results=100):
+    """获取视频评论"""
+    url = f"https://gateway.maton.ai/youtube/youtube/v3/commentThreads?part=snippet,replies&videoId={video_id}&maxResults={max_results}&order=relevance"
+    req = urllib.request.Request(url)
+    req.add_header('Authorization', f'Bearer {api_key}')
+    
+    try:
+        with urllib.request.urlopen(req, timeout=30) as response:
+            data = json.loads(response.read().decode('utf-8'))
+            return data.get('items', [])
+    except Exception as e:
+        print(f"⚠️ 获取评论失败: {e}")
+        return []
 
 def main():
     """主函数"""
     if len(sys.argv) < 2:
-        print("用法: python youtube_analyzer.py <video_id>")
+        print("=" * 60)
+        print("🎬 YouTube Video Analyzer Pro")
+        print("=" * 60)
+        print()
+        print("Usage: python youtube_analyzer.py <video_id>")
+        print()
+        print("Examples:")
+        print("  python youtube_analyzer.py dQw4w9WgXcQ")
         sys.exit(1)
     
     video_id = sys.argv[1]
     api_key = get_api_key()
     
     if not api_key:
-        print("❌ 未找到 MATON_API_KEY，请配置 ~/.zshrc")
+        print("❌ 未找到 MATON_API_KEY")
         sys.exit(1)
+    
+    # 启动AI服务器
+    port = start_ai_server()
+    if port:
+        print(f"🌐 AI服务器已启动 (端口: {port})")
     
     print(f"🔍 分析视频: {video_id}")
     
@@ -964,18 +1149,28 @@ def main():
         print("❌ 无法获取视频数据")
         sys.exit(1)
     
-    print("📡 获取视频数据...")
-    
     # 获取评论
     comments = fetch_comments(video_id, api_key)
-    print(f"💬 获取评论数据... {len(comments)} 条")
+    print(f"💬 获取 {len(comments)} 条评论")
+    
+    # 提取字幕
+    subtitle_text = extract_subtitle(video_id)
     
     # 生成报告
+    REPORTS_DIR.mkdir(parents=True, exist_ok=True)
+    html = generate_html_report(video_data, comments, video_id, subtitle_text)
+    
     output_path = REPORTS_DIR / f"youtube_analysis_{video_id}_{datetime.now().strftime('%Y%m%d')}.html"
-    generate_html_report(video_data, comments, video_id, output_path)
+    with open(output_path, 'w', encoding='utf-8') as f:
+        f.write(html)
     
     print(f"✅ 报告已保存: {output_path}")
-    print(f"📊 分析了 {min(len(comments), 50)} 条评论")
+    
+    # 清理任务文件
+    tasks_dir = Path.home() / '.openclaw' / '.ai_tasks'
+    if tasks_dir.exists():
+        for f in tasks_dir.glob('*.json'):
+            f.unlink()
 
 if __name__ == "__main__":
     main()

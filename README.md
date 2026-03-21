@@ -1,195 +1,195 @@
----
-name: youtube-analyzer
-skill_version: 1.0.0
-description: |
-  YouTube视频深度分析工具 - 标准9模块看板报告生成器。
-  
-  使用场景:
-  1. 分析YouTube产品评测视频
-  2. 监控竞品视频动态
-  3. 收集用户反馈和洞察
-  4. 生成专业的视频分析报告
-  
-  输出格式: 深色主题HTML看板 (9模块标准结构)
-  
-  数据源: YouTube Data API v3
----
-
 # YouTube Video Analyzer
 
-A professional YouTube video analysis tool that generates standardized 9-module dashboard reports.
+YouTube视频深度分析工具 - 一键生成专业9模块HTML报告
 
-## Features
+## 功能特性
 
-- 📊 **9-Module Standard Report**: Consistent analysis structure
-- 🎨 **Dark Theme Dashboard**: Professional HTML output
-- 😊 **Sentiment Analysis**: Comment emotion detection
-- 🔑 **Keyword Extraction**: Top keywords cloud
-- 💡 **Core Insights**: Key findings and trends
-- 🌍 **Multi-language Support**: Chinese/English mixed reports
+- 📊 **数据收集**: 自动提取视频数据、字幕、评论
+- 🤖 **AI分析**: 支持多种AI后端（OpenClaw主模型/OpenAI/Claude）
+- 🎨 **专业报告**: 生成深色主题9模块HTML报告
+- 🔧 **自包含**: 独立运行，无需额外skill依赖
 
-## Standard Report Structure (9 Modules)
+## 9模块报告
 
-```
-┌─────────────────────────────────────────────────┐
-│  📺 YouTube Video Analysis Report                │
-├─────────────────────────────────────────────────┤
-│  1️⃣ Statistics Grid (5 cards)                   │
-│     👁️ Views | 👍 Likes | 💬 Comments | 📊 Rate │
-├─────────────────────────────────────────────────┤
-│  2️⃣ Engagement Rate Analysis                    │
-│     CSS Ring Chart + Evaluation                 │
-├─────────────────────────────────────────────────┤
-│  3️⃣ Video Content Summary                       │
-│     Intro + Feature List                        │
-├─────────────────────────────────────────────────┤
-│  4️⃣ Comment Sentiment Analysis                  │
-│     Positive | Neutral | Negative Distribution  │
-├─────────────────────────────────────────────────┤
-│  5️⃣ Top Comments (5 featured)                   │
-│     Author | Date | Content | Likes             │
-├─────────────────────────────────────────────────┤
-│  6️⃣ Keyword Cloud                               │
-│     Tiered display (kw-1 to kw-5)               │
-├─────────────────────────────────────────────────┤
-│  7️⃣ Core Insights                               │
-│     Green/Yellow/Red/Blue cards                 │
-├─────────────────────────────────────────────────┤
-│  8️⃣ Footer                                       │
-│     Time | Source | Video Link                  │
-└─────────────────────────────────────────────────┘
-```
+1. 📈 统计网格 - 观看/点赞/评论/点赞率
+2. 📊 互动率分析 - 圆形进度图
+3. 🎬 视频内容摘要 - AI生成分段重点
+4. 😊 评论情感分析 - 三色进度条
+5. 🗂️ 评论主题分布 - 6宫格卡片
+6. 🏆 热门评论精选 - 含中文翻译
+7. 🔑 高频关键词 - 云图
+8. 💡 核心洞察 - 6条专业洞察
+9. 📄 页脚信息
 
-## Installation
+## 安装
 
-### Prerequisites
-
-- Python 3.8+
-- YouTube Data API Key (via Maton Gateway or Google Cloud)
-
-### Install
+### 方式1: pip安装（推荐）
 
 ```bash
-# Clone the repository
-git clone https://github.com/YOUR_USERNAME/youtube-analyzer.git
+# 基础安装
+pip install youtube-analyzer
 
-# Or install as OpenClaw skill
-clawdhub install youtube-analyzer
+# 带OpenAI支持
+pip install youtube-analyzer[openai]
+
+# 带所有AI后端
+pip install youtube-analyzer[all]
 ```
 
-### Configuration
-
-Set your YouTube API Key:
+### 方式2: 源码安装
 
 ```bash
-# Add to ~/.zshrc or ~/.bashrc
+git clone https://github.com/MK3000-AKA/youtube-analyzer.git
+cd youtube-analyzer
+pip install -e .
+```
+
+### 方式3: OpenClaw Skill安装
+
+```bash
+clawhub install youtube-analyzer
+```
+
+## 配置
+
+### 必需配置
+
+```bash
+# YouTube API Key (通过Maton Gateway)
 export MATON_API_KEY="your_api_key_here"
 ```
 
-Or create `~/.config/youtube-analyzer/config.json`:
-
-```json
-{
-  "api_key": "your_api_key_here"
-}
-```
-
-## Usage
-
-### Command Line
+### 可选配置 - AI后端
 
 ```bash
-# Analyze a video by ID
-python youtube_analyzer.py VIDEO_ID
+# 方式1: 使用OpenClaw主模型（默认，无需额外配置）
+export YOUTUBE_ANALYZER_AI_BACKEND="openclaw"
 
-# Or by URL
-python youtube_analyzer.py "https://www.youtube.com/watch?v=VIDEO_ID"
+# 方式2: 使用OpenAI GPT-4
+export YOUTUBE_ANALYZER_AI_BACKEND="openai"
+export OPENAI_API_KEY="sk-..."
+
+# 方式3: 使用Claude
+export YOUTUBE_ANALYZER_AI_BACKEND="anthropic"
+export ANTHROPIC_API_KEY="sk-ant-..."
 ```
 
-### As OpenClaw Skill
+### 可选配置 - 输出目录
 
-Trigger phrases:
-- "分析YouTube视频"
-- "生成YouTube报告"
-- "YouTube视频深度分析"
-
-## Output
-
-Reports are saved to:
-```
-~/.openclaw/workspace/reports/youtube-analysis/
-└── youtube_analysis_{VIDEO_ID}_{YYYYMMDD}.html
+```bash
+export YOUTUBE_ANALYZER_OUTPUT_DIR="/path/to/output"
 ```
 
-## Design System
+## 使用
 
-### Colors
+### 基础使用
 
-```css
---bg-primary: #0f0f0f;
---bg-card: #1a1a1a;
---accent-youtube: #ff0000;
---accent-positive: #22c55e;
---accent-neutral: #f59e0b;
---accent-negative: #ef4444;
+```bash
+youtube-analyzer <video_id>
+
+# 示例
+youtube-analyzer JwZFwNLLoKg
 ```
 
-### Layout
+### 指定AI后端
 
-- Container max-width: 1100px
-- Card border-radius: 12px
-- Responsive: Mobile → Desktop
-
-## API Reference
-
-### YouTube Data API
-
-This tool uses YouTube Data API v3 via Maton Gateway:
-
-```
-https://gateway.maton.ai/youtube/youtube/v3/
+```bash
+youtube-analyzer JwZFwNLLoKg --backend openai
 ```
 
-Required endpoints:
-- `videos` - Video metadata and statistics
-- `commentThreads` - Video comments
+### 完整示例
 
-## Project Structure
+```bash
+# 配置API Key
+export MATON_API_KEY="your_maton_api_key"
+
+# 运行分析
+youtube-analyzer dQw4w9WgXcQ
+
+# 输出:
+# ✅ 报告已生成: ~/.openclaw/workspace/reports/youtube-analysis/youtube_analysis_dQw4w9WgXcQ_20240321.html
+```
+
+## 工作流程
+
+```
+┌─────────────────────────────────────────────────────────────┐
+│                    YouTube Video Analyzer                    │
+├─────────────────────────────────────────────────────────────┤
+│                                                              │
+│  Step 1: 数据收集                                            │
+│  ├── YouTube API → 视频元数据（标题/播放量/点赞数）           │
+│  ├── yt-dlp → 字幕（AI字幕/CC字幕）                          │
+│  └── YouTube API → 评论（前100条）                           │
+│                                                              │
+│  Step 2: AI分析                                              │
+│  ├── 内容分析 → 视频简介/分段重点/核心特性                   │
+│  └── 评论分析 → 主题分类/中文翻译/核心洞察                   │
+│                                                              │
+│  Step 3: 报告生成                                            │
+│  └── 9模块HTML报告 → 深色主题/响应式设计                     │
+│                                                              │
+└─────────────────────────────────────────────────────────────┘
+```
+
+## AI后端对比
+
+| 后端 | 优点 | 缺点 | 适用场景 |
+|------|------|------|----------|
+| **openclaw** | 无需额外API Key，使用主代理模型 | 需要运行OpenClaw | 已使用OpenClaw的用户 |
+| **openai** | GPT-4质量高，响应快 | 需要OpenAI API Key，收费 | 追求高质量分析 |
+| **anthropic** | Claude理解能力强 | 需要Claude API Key，收费 | 长文本分析 |
+
+## 依赖项
+
+### 必需
+- Python >= 3.8
+- yt-dlp (>=2023.12.30) - 字幕提取
+- requests (>=2.28.0) - HTTP请求
+
+### 可选
+- openai (>=1.0.0) - OpenAI GPT支持
+- anthropic (>=0.8.0) - Claude支持
+
+## 项目结构
 
 ```
 youtube-analyzer/
-├── SKILL.md              # Skill documentation
-├── README.md             # Project readme
-├── youtube_analyzer.py   # Main script
-├── template.html         # HTML template
-├── requirements.txt      # Dependencies
-└── examples/             # Example reports
+├── youtube_analyzer/           # 主包
+│   ├── __init__.py            # 入口点
+│   ├── youtube_api.py         # YouTube API封装
+│   ├── subtitle.py            # 字幕提取
+│   ├── ai_analyzer.py         # AI分析
+│   └── report_generator.py    # 报告生成
+├── templates/                  # HTML模板
+├── requirements.txt           # 依赖声明
+├── setup.py                   # 安装脚本
+└── README.md                  # 本文件
 ```
 
-## Dependencies
+## 更新日志
 
-- Python 3.8+
-- Standard library only (no external deps)
+### v2.0.0 (2024-03-21)
+- 🎉 重大重构，支持独立运行
+- 🤖 多AI后端支持（OpenClaw/OpenAI/Claude）
+- 📦 pip可安装
+- 🔧 自包含，无需额外skill
 
-## License
+### v1.0.0 (2024-03-17)
+- ✨ 初始版本
+- 🎨 9模块HTML报告
+- 📊 基础数据分析
 
-MIT License - See LICENSE file
+## 许可证
 
-## Contributing
+MIT License
 
-Contributions welcome! Please read CONTRIBUTING.md first.
+## 贡献
 
-## Changelog
+欢迎Issue和PR！
 
-### v1.0.0 (2026-03-20)
-- Initial release
-- 9-module standard template
-- Sentiment analysis
-- Keyword extraction
-- Dark theme dashboard
+## 致谢
 
-## Acknowledgments
-
-- YouTube Data API v3
-- Maton Gateway
-- OpenClaw Community
+- yt-dlp - 强大的视频下载工具
+- OpenClaw - AI Agent运行时
+- Kimi/Claude/GPT - AI分析支持

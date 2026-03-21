@@ -1,6 +1,13 @@
-# No external dependencies required
-# Uses Python standard library only
+# requirements.txt - YouTube Analyzer 依赖声明
 
-# Optional: For enhanced functionality
-# requests>=2.28.0
-# beautifulsoup4>=4.11.0
+# 核心依赖
+yt-dlp>=2023.12.30
+requests>=2.28.0
+
+# AI分析后端（可选，根据配置使用）
+# openai>=1.0.0  # OpenAI API
+# anthropic>=0.8.0  # Claude API
+
+# 本地开发依赖
+# pytest>=7.0.0
+# black>=22.0.0
