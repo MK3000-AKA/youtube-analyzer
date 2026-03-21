@@ -232,9 +232,34 @@ def analyze_with_external_ai(analysis_type, content):
     task_file.unlink()
     return None
 
-def extract_subtitle(video_id):
-    """使用 yt-dlp 提取YouTube视频字幕"""
-    print("🎬 正在提取视频字幕...")
+def extract_subtitle_with_api(video_id):
+    """使用 youtube-transcript-api 提取字幕（首选方案）"""
+    try:
+        from youtube_transcript_api import YouTubeTranscriptApi
+        
+        print("🎬 正在使用 youtube-transcript-api 提取字幕...")
+        
+        # 创建 API 实例并获取字幕
+        api = YouTubeTranscriptApi()
+        transcript_list = api.fetch(video_id, languages=['en', 'en-US', 'en-GB'])
+        
+        # 获取字幕文本 - 使用属性访问
+        full_text = ' '.join([seg.text for seg in transcript_list])
+        
+        if full_text.strip():
+            print(f"✅ 字幕提取成功 (API)，共 {len(full_text)} 字符")
+            return full_text[:15000]
+        
+        return None
+        
+    except Exception as e:
+        print(f"⚠️ youtube-transcript-api 提取失败: {e}")
+        return None
+
+
+def extract_subtitle_with_ytdlp(video_id):
+    """使用 yt-dlp 提取字幕（备选方案）"""
+    print("🎬 正在使用 yt-dlp 提取字幕...")
     
     with tempfile.TemporaryDirectory() as tmpdir:
         cmd = [
@@ -265,15 +290,33 @@ def extract_subtitle(video_id):
                 
                 subtitle_text = ' '.join(full_text)
                 if subtitle_text.strip():
-                    print(f"✅ 成功提取字幕，共 {len(subtitle_text)} 字符")
+                    print(f"✅ 字幕提取成功 (yt-dlp)，共 {len(subtitle_text)} 字符")
                     return subtitle_text[:15000]
             
-            print("⚠️ 未找到YouTube字幕")
             return None
             
         except Exception as e:
-            print(f"⚠️ 字幕提取失败: {e}")
+            print(f"⚠️ yt-dlp 提取失败: {e}")
             return None
+
+
+def extract_subtitle(video_id):
+    """提取YouTube视频字幕 - 双引擎方案"""
+    print("🎬 正在提取视频字幕...")
+    
+    # 方案1: 使用 youtube-transcript-api (更快、更稳定)
+    subtitle = extract_subtitle_with_api(video_id)
+    if subtitle:
+        return subtitle
+    
+    # 方案2: 使用 yt-dlp (备选)
+    print("🔄 尝试备选方案...")
+    subtitle = extract_subtitle_with_ytdlp(video_id)
+    if subtitle:
+        return subtitle
+    
+    print("⚠️ 未能提取到字幕")
+    return None
 
 def analyze_content_with_ai(subtitle_text):
     """使用外部AI分析字幕内容"""
@@ -1083,7 +1126,8 @@ def generate_html_report(video_data, comments, video_id, subtitle_text):
 </div>
 
 <div class="footer">
-    <p>分析报告生成于 {datetime.now().strftime('%Y年%m月%d日')} · 数据来源：YouTube Data API v3 · AI辅助分析</p>
+    <p>🔗 <strong>在线查看此报告</strong>：<a href="http://100.95.202.4:8081/youtube-analysis/{video_id}_analysis.html" target="_blank">http://100.95.202.4:8081/youtube-analysis/{video_id}_analysis.html</a></p>
+    <p style="margin-top:8px;">分析报告生成于 {datetime.now().strftime('%Y年%m月%d日')} · 数据来源：YouTube Data API v3 · AI辅助分析</p>
     <p style="margin-top:6px;">视频：<a href="https://youtube.com/watch?v={video_id}" target="_blank">https://youtube.com/watch?v={video_id}</a></p>
 </div>
 

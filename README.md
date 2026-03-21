@@ -169,6 +169,12 @@ youtube-analyzer/
 
 ## 更新日志
 
+### v2.1.0 (2026-03-22)
+- ⚡ **双引擎字幕提取**：youtube-transcript-api + yt-dlp
+- 🔄 **自动降级**：API失败时自动切换
+- 📊 **优化9模块**：视频内容摘要更可靠
+- 📦 **打包依赖**：youtube-transcript-api 已添加到安装依赖
+
 ### v2.0.0 (2024-03-21)
 - 🎉 重大重构，支持独立运行
 - 🤖 多AI后端支持（OpenClaw/OpenAI/Claude）

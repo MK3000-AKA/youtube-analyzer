@@ -1,7 +1,8 @@
 # requirements.txt - YouTube Analyzer 依赖声明
 
 # 核心依赖
-yt-dlp>=2023.12.30
+youtube-transcript-api>=1.2.0  # 首选字幕提取方案
+yt-dlp>=2023.12.30             # 备选字幕提取方案
 requests>=2.28.0
 
 # AI分析后端（可选，根据配置使用）

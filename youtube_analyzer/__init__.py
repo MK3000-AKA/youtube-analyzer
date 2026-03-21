@@ -12,7 +12,7 @@ YouTube Video Analyzer - 自包含版本
     youtube-analyzer <video_id>
 """
 
-__version__ = "2.0.0"
+__version__ = "2.1.0"
 
 import os
 import sys
@@ -123,11 +123,50 @@ class YouTubeAPI:
 
 
 class SubtitleExtractor:
-    """字幕提取 - 使用yt-dlp"""
+    """字幕提取 - 双引擎方案：youtube-transcript-api + yt-dlp"""
     
     def extract(self, video_id: str) -> Optional[str]:
-        """提取字幕"""
-        print("🎬 正在提取视频字幕...")
+        """提取字幕 - 优先使用API，备选yt-dlp"""
+        # 方案1: 使用 youtube-transcript-api (更快、更稳定)
+        subtitle = self._extract_with_api(video_id)
+        if subtitle:
+            return subtitle
+        
+        # 方案2: 使用 yt-dlp (备选)
+        print("🔄 尝试备选方案 yt-dlp...")
+        subtitle = self._extract_with_ytdlp(video_id)
+        if subtitle:
+            return subtitle
+        
+        print("   ⚠️ 未能提取到字幕")
+        return None
+    
+    def _extract_with_api(self, video_id: str) -> Optional[str]:
+        """使用 youtube-transcript-api 提取字幕"""
+        try:
+            from youtube_transcript_api import YouTubeTranscriptApi
+            
+            print("🎬 正在使用 youtube-transcript-api 提取字幕...")
+            
+            api = YouTubeTranscriptApi()
+            transcript = api.fetch(video_id, languages=['en', 'en-US', 'en-GB'])
+            
+            # transcript 是 FetchedTranscript 对象，每个元素是 FetchedTranscriptSnippet
+            full_text = ' '.join([seg.text for seg in transcript])
+            
+            if full_text.strip():
+                print(f"   ✅ 提取成功 (API)，共 {len(full_text)} 字符")
+                return full_text[:15000]
+            
+            return None
+            
+        except Exception as e:
+            print(f"   ⚠️ API提取失败: {e}")
+            return None
+    
+    def _extract_with_ytdlp(self, video_id: str) -> Optional[str]:
+        """使用 yt-dlp 提取字幕"""
+        print("🎬 正在使用 yt-dlp 提取字幕...")
         
         with tempfile.TemporaryDirectory() as tmpdir:
             cmd = [
@@ -160,14 +199,13 @@ class SubtitleExtractor:
                     
                     subtitle_text = ' '.join(full_text)
                     if subtitle_text.strip():
-                        print(f"   ✅ 提取成功，共 {len(subtitle_text)} 字符")
+                        print(f"   ✅ 提取成功 (yt-dlp)，共 {len(subtitle_text)} 字符")
                         return subtitle_text[:15000]
                 
-                print("   ⚠️ 未找到字幕")
                 return None
                 
             except Exception as e:
-                print(f"   ⚠️ 字幕提取失败: {e}")
+                print(f"   ⚠️ yt-dlp提取失败: {e}")
                 return None
 
 
