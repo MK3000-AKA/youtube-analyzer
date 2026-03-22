@@ -10,7 +10,7 @@ YouTube视频深度分析工具，一键生成专业9模块HTML报告。
 - 📝 字幕提取（**youtube-transcript-api** + yt-dlp 双引擎）
 - 💬 评论获取（YouTube API）
 - 🤖 AI内容分析（视频摘要/评论分类/翻译）
-- 🎨 9模块HTML报告生成
+- 🎨 **9模块标准模板HTML报告**（v4.0自动校验）
 
 ## 安装
 
@@ -55,18 +55,24 @@ youtube-analyzer [video_id]
 ## 使用示例
 
 ```bash
-# 分析单个视频
+# 分析单个视频（v4.0标准模板流程）
 youtube-analyzer JwZFwNLLoKg
 
 # 指定AI后端
 youtube-analyzer JwZFwNLLoKg --backend openai
+
+# 手动生成v4报告
+python3 ai_youtube_report_v4.py VIDEO_ID
+
+# 校验已有报告
+python3 validate_report.py report.html
 ```
 
-## 工作流程
+## 工作流程（v4.0标准模板流程）
 
 ```
 ┌─────────────────────────────────────────────────────────────┐
-│                    YouTube Analyzer 工作流                    │
+│              YouTube Analyzer v4.0 标准流程                  │
 ├─────────────────────────────────────────────────────────────┤
 │                                                             │
 │  1. 视频数据获取 (YouTube Data API)                          │
@@ -84,40 +90,47 @@ youtube-analyzer JwZFwNLLoKg --backend openai
 │  4. 评论获取 (YouTube Data API)                              │
 │     └── 获取评论列表、情感分析、热门评论精选                      │
 │                                                             │
-│  5. 报告生成 (9模块HTML)                                      │
-│     ├── ① 统计网格 (观看/点赞/评论/点赞率/已分析)                │
-│     ├── ② 互动率分析 (环形图)                                 │
-│     ├── ③ 视频内容摘要 ← 使用字幕提取结果                      │
-│     ├── ④ 评论情感分析                                        │
-│     ├── ⑤ 评论主题分布                                        │
-│     ├── ⑥ 热门评论精选                                        │
-│     ├── ⑦ 高频关键词                                          │
-│     ├── ⑧ 核心洞察                                            │
-│     └── ⑨ 页脚                                                │
+│  5. 报告生成 (v4.0标准模板)                                   │
+│     ├── 读取 template.html 标准模板                          │
+│     ├── 替换所有变量占位符                                    │
+│     └── 确保CSS样式100%一致                                  │
+│                                                             │
+│  6. 自动校验 (validate_report.py)                            │
+│     ├── 检查29个必需模块                                     │
+│     ├── 检查5个CSS样式                                       │
+│     ├── 检查5个设计规范                                      │
+│     └── 确保报告符合标准                                     │
 │                                                             │
 └─────────────────────────────────────────────────────────────┘
 ```
 
-## 9模块报告结构
+## 9模块标准报告结构
 
-### 模块3: 视频内容摘要 (依赖字幕提取)
+### 模块清单（8个主要模块）
 
-此模块完全依赖字幕提取功能：
+| 模块 | 内容 | 数据来源 |
+|------|------|----------|
+| 1. **Hero区域** | YouTube红色标签、标题、博主、日期、链接 | YouTube API |
+| 2. **统计网格** | 5个数据卡片（观看/点赞/评论/点赞率/已分析） | YouTube API |
+| 3. **互动率分析** | CSS环形图 + 评价文字 | 计算 |
+| 4. **视频内容摘要** | AI生成简介 + 8个特性 | AI分析 |
+| 5. **评论情感分析** | 3进度条（正/中/负）+ 汇总卡片 | AI分析 |
+| 6. **评论主题分布** | 6宫格主题卡片 | AI分析 |
+| 7. **热门评论精选** | 5条评论（原文+翻译+徽章） | AI分析 |
+| 8. **高频关键词** | 词云（kw-1~5分级） | AI分析 |
+| 9. **核心洞察** | 6宫格洞察卡片（绿/黄/红/蓝） | AI分析 |
 
-```
-字幕提取
-    ↓
-AI分析 (Kimi/OpenAI/Claude)
-    ↓
-生成结构化摘要:
-    ├── 【视频简介】100字内容概述
-    ├── 【分段重点】1. 2. 3. 时间线
-    └── 【核心特性】关键要点列表
-```
+### 设计规范
 
-**双引擎字幕提取保证此模块可用性：**
-- ✅ youtube-transcript-api: 快速、稳定
-- ✅ yt-dlp: 兼容性强、自动降级
+| 元素 | 值 |
+|------|-----|
+| 背景 | `#0f0f0f` |
+| 卡片背景 | `#1a1a1a` |
+| 卡片边框 | `#2a2a2a` |
+| 强调色(YouTube) | `#ff0000` |
+| 强调色(B站) | `#fb7299` |
+| 最大宽度 | `1100px` |
+| 字体 | `-apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif` |
 
 ## 字幕提取双引擎
 
@@ -148,6 +161,27 @@ transcript = api.fetch("VIDEO_ID", languages=['en'])
 subtitle = ' '.join([seg.text for seg in transcript])
 ```
 
+## 自动校验功能（v4.0新增）
+
+### 校验脚本
+
+```bash
+python3 validate_report.py report.html
+```
+
+### 检查项
+
+- **29个必需模块**：Hero、统计网格、情感分析、主题分布等
+- **5个CSS样式**：背景色、卡片背景、强调色、字体等
+- **5个设计规范**：颜色值、最大宽度等
+- **模块完整性**：8个主要模块全部存在
+
+### 输出结果
+
+- ✅ **校验通过** - 报告完全符合标准
+- ⚠️ **校验通过(有警告)** - 可以使用，建议检查
+- ❌ **校验失败** - 需要修复差异
+
 ## 输出
 
 报告保存至: `~/.openclaw/workspace/reports/youtube-analysis/`
@@ -163,16 +197,33 @@ subtitle = ' '.join([seg.text for seg in transcript])
 
 ```
 ┌─────────────────────────────────────────────────────────────┐
-│                    YouTube Analyzer                         │
+│                    YouTube Analyzer v4.0                    │
 ├─────────────────────────────────────────────────────────────┤
 │  Data Collection (YouTube API)                              │
 │  Subtitle Extraction (youtube-transcript-api + yt-dlp)      │
 │  AI Analysis (Multiple Backends)                            │
-│  Report Generation (9-Module HTML)                          │
+│  Template Rendering (template.html)                         │
+│  Auto Validation (validate_report.py)                       │
 └─────────────────────────────────────────────────────────────┘
 ```
 
+## 文件说明
+
+| 文件 | 说明 |
+|------|------|
+| `template.html` | 标准9模块HTML模板 |
+| `validate_report.py` | 自动校验脚本 |
+| `ai_youtube_report_v4.py` | v4标准模板报告生成器 |
+| `REPORT_WORKFLOW_v4.md` | v4流程完整文档 |
+
 ## 更新日志
+
+### v4.0 (2026-03-22)
+- ✅ **新增**：v4.0标准模板流程
+- ✅ **新增**：自动校验功能 (`validate_report.py`)
+- ✅ **新增**：标准HTML模板 (`template.html`)
+- ✅ **优化**：确保报告样式100%一致
+- ✅ **优化**：AI调用失败时自动使用默认数据
 
 ### v2.1.0 (2026-03-22)
 - ✅ 集成 youtube-transcript-api 作为首选字幕提取方案
@@ -185,7 +236,7 @@ subtitle = ' '.join([seg.text for seg in transcript])
 
 ## 版本
 
-v2.1.0 - 双引擎字幕提取，9模块报告
+v4.0 - 标准模板流程，自动校验，9模块报告
 
 ## 作者
 

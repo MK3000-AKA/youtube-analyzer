@@ -413,6 +413,48 @@ topics需要4-6个主题，insights需要4-6条洞察。
         except Exception as e:
             print(f"   ⚠️ Claude调用失败: {e}")
             return None
+
+    def _call_gateway_http(self, prompt: str) -> Optional[str]:
+        """直接调用OpenClaw Gateway HTTP API"""
+        try:
+            import urllib.request
+            
+            gateway_url = os.environ.get('OPENCLAW_GATEWAY_URL', 'http://127.0.0.1:18789')
+            api_key = os.environ.get('OPENCLAW_GATEWAY_TOKEN', '')
+            
+            print(f"   🌐 调用 Gateway: {gateway_url}")
+            
+            # 构建请求
+            data = json.dumps({
+                "model": "kimi-coding/k2p5",
+                "messages": [
+                    {"role": "system", "content": "你是一个专业的视频内容分析师。请用中文输出JSON格式。"},
+                    {"role": "user", "content": prompt}
+                ],
+                "max_tokens": 2000
+            }).encode('utf-8')
+            
+            req = urllib.request.Request(
+                f"{gateway_url}/v1/chat/completions",
+                data=data,
+                headers={
+                    "Content-Type": "application/json",
+                    "Authorization": f"Bearer {api_key}"
+                },
+                method="POST"
+            )
+            
+            with urllib.request.urlopen(req, timeout=60) as response:
+                result_data = json.loads(response.read().decode('utf-8'))
+                if 'choices' in result_data and len(result_data['choices']) > 0:
+                    return result_data['choices'][0]['message']['content']
+                else:
+                    print(f"   ⚠️ Gateway返回异常: {result_data}")
+                    return None
+                    
+        except Exception as e:
+            print(f"   ⚠️ Gateway HTTP调用失败: {e}")
+            return None
     
     def _parse_content_result(self, result: str) -> Dict:
         """解析内容分析结果"""

@@ -2,7 +2,54 @@
 
 ## 快速发布步骤
 
-### 1. 创建 GitHub 仓库
+### 1. 创建 GitHub Release (v2.1.0)
+
+```bash
+# 使用 GitHub CLI 创建 Release
+gh release create v2.1.0 \
+  --title "v2.1.0 - 双引擎字幕提取" \
+  --notes-file - << 'EOF'
+## YouTube Analyzer v2.1.0 ⚡
+
+### 新特性
+- ⚡ **双引擎字幕提取**: youtube-transcript-api + yt-dlp
+- 🔄 **自动降级机制**: API失败时自动切换
+- 📊 **优化9模块报告**: 视频内容摘要更可靠
+- 📦 **打包依赖**: youtube-transcript-api 已添加到安装依赖
+
+### 字幕提取双引擎
+
+| 引擎 | 优先级 | 特点 |
+|------|--------|------|
+| youtube-transcript-api | 1️⃣ 首选 | 更快、更稳定、无需外部工具 |
+| yt-dlp | 2️⃣ 备选 | 兼容性更好、自动降级 |
+
+### 安装
+
+```bash
+# pip 安装
+pip install youtube-analyzer
+
+# 或更新到最新版
+pip install --upgrade youtube-analyzer
+```
+
+### 使用
+
+```bash
+youtube-analyzer VIDEO_ID
+```
+
+### 完整文档
+See [SKILL.md](SKILL.md) for workflow documentation.
+EOF
+```
+
+---
+
+## 历史版本
+
+### v2.0.0 发布步骤
 
 1. 访问 https://github.com/new
 2. 仓库名称: `youtube-analyzer`
