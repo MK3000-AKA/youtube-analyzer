@@ -2,6 +2,16 @@
 
 ## Changelog
 
+### v5.0 (2026-03-24)
+- 🤖 **AI调用重写**: 使用 `openclaw agent --channel feishu`（可靠），不用 `--local`
+- 🔧 **JSON截断修复**: 长输出被截断时，用正则提取关键字段（fix_incomplete_json）
+- 💬 **回复数修复**: YouTube API `totalReplyCount` 替代 `replyCount`（后者永远为0）
+- 🇨🇳 **中文情感标签**: 😊极度正面 / 😐中立 / 😠负面
+- 🔄 **回复徽章**: 有回复时显示 `💬 X条回复`
+- 📊 **评论数量**: 提升到 100 条（之前只有20条）
+- ✅ **质量校验**: 拒绝默认占位符，必须基于真实数据
+- 📝 **SKILL.md更新**: 完整v5.0文档
+
 ### v2.1.0 (2026-03-22)
 - ⚡ **双引擎字幕提取**：集成 youtube-transcript-api 作为首选方案
 - 🔄 **自动降级机制**：API失败时自动切换到 yt-dlp
