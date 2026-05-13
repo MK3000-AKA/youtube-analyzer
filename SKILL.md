@@ -1,8 +1,65 @@
-# YouTube Video Analyzer v5.0
+---
+name: youtube-analyzer
+description: YouTube视频AI分析技能。当用户发来YouTube链接并要求"分析"、"解读"、"评测"、或触发口令"芝麻开门"时自动激活。提取字幕、AI深度分析、生成结构化HTML报告，包含核心洞察、亮点时间轴、评论区分析。
+---
+
+# YouTube Video Analyzer v6.0
+
+---
+
+## ⚠️ MANDATORY RULES — 强制执行规则（违反=错误）
+
+### 唯一正确的运行命令
+```bash
+python3 ~/.openclaw/workspace/skills/youtube-analyzer/ai_youtube_report_v6.py <VIDEO_ID> [OUTPUT_DIR]
+```
+
+### ⚠️ 严格禁止
+1. **禁止** 手动写Python生成HTML报告
+2. **禁止** 修改或重写template.html
+3. **禁止** 使用其他文件名调用报告生成器
+4. **禁止** 调用 `simple_report_wrapper.py` 生成深度报告（那是快速基础报告生成器）
+5. **禁止** 自己拼接HTML字符串发给用户
+
+### 两个脚本的用途区分
+| 脚本 | 用途 | 调用者 |
+|------|------|--------|
+| `ai_youtube_report_v6.py` | **深度AI分析报告**（完整9模块） | 监控脚本的 `generate_deep_report()` + 手动命令 |
+| `simple_report_wrapper.py` | **快速基础报告**（无AI分析，<30秒） | 监控脚本的 `generate_fast_report()` |
+
+### yt-dlp字幕提取的关键参数
+yt-dlp是Python launcher脚本，必须用 `python3 -m yt_dlp` 调用，并传入YouTube Cookie文件：
+```
+python3 -m yt_dlp --cookies ~/.youtube_cookies.txt --write-auto-sub ...
+```
+
+### 模板变量格式
+- 模板占位符：`{{VAR_NAME}}`（双大括号）
+- 替换方法：`html = html.replace('{{VAR_NAME}}', value)`（用`.replace()`，不用`.format()`）
+
+### 监控脚本中的报告生成器路径（必须指向v6）
+```python
+# 正确
+strict_path = Path.home() / ".openclaw" / "workspace" / "skills" / "youtube-analyzer" / "ai_youtube_report_v6.py"
+
+# 错误（v4/v5/其他版本已删除）
+strict_path = ... / "ai_youtube_report_v4.py"   # ❌ 已删除
+strict_path = ... / "ai_youtube_report_v5.py"   # ❌ 已删除
+```
+
+---
+
+
 
 > 一键生成专业9模块HTML报告，基于真实数据 + Kimi AI分析
 
-**版本**: 5.0 | **作者**: MK3000-AKA | **维护者**: @larksuite/openclaw
+**版本**: 6.0（严格模板版）| **作者**: MK3000-AKA | **维护者**: @larksuite/openclaw
+
+**v6 核心改进**: 
+- 严格JSON Schema约束AI输出格式
+- 校验失败自动重试（最多3次）
+- 修复评论徽章、中文情感标签、时长分类等所有模板变量问题
+- AI分析失败时明确标注，不静默回退
 
 ---
 
@@ -42,10 +99,19 @@ export MATON_API_KEY="your_key"
 
 ```bash
 cd ~/.openclaw/workspace/skills/youtube-analyzer
-python3 ai_youtube_report_v5.py <VIDEO_ID>
+python3 ai_youtube_report_v6.py <VIDEO_ID> [OUTPUT_DIR]
 ```
 
 **输出**: `~/.openclaw/workspace/reports/youtube-analysis/youtube_analysis_{VIDEO_ID}_{DATE}.html`
+
+**推荐输出目录**:
+```bash
+# YouTube频道监控报告
+python3 ai_youtube_report_v6.py <VIDEO_ID> ~/.openclaw/workspace/reports/youtube-channel-monitor/
+
+# Avata 360关键词报告
+python3 ai_youtube_report_v6.py <VIDEO_ID> ~/.openclaw/workspace/reports/youtube-avata360/
+```
 
 ---
 
@@ -157,7 +223,7 @@ A: 在 `call_openclaw_ai()` 中修改 `timeout=300`（秒）。
 
 | 文件 | 说明 |
 |------|------|
-| `ai_youtube_report_v5.py` | **主脚本**（v5版本） |
+| `ai_youtube_report_v6.py` | **唯一正确的主脚本**（v6版本，禁止使用旧版） |
 | `template.html` | 标准HTML模板 |
 | `youtube_analyzer/` | YouTube API客户端 |
 | `youtube_analyzer.py` | 独立版（含双引擎字幕提取） |

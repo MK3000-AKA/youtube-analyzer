@@ -232,16 +232,18 @@ def analyze_with_external_ai(analysis_type, content):
     task_file.unlink()
     return None
 
-def extract_subtitle_with_api(video_id):
+def extract_subtitle_with_api(video_id, languages=None):
     """使用 youtube-transcript-api 提取字幕（首选方案）"""
+    if languages is None:
+        languages = ['en', 'en-US', 'en-GB']
     try:
         from youtube_transcript_api import YouTubeTranscriptApi
         
-        print("🎬 正在使用 youtube-transcript-api 提取字幕...")
+        print(f"🎬 正在使用 youtube-transcript-api 提取字幕 (languages={languages})...")
         
         # 创建 API 实例并获取字幕
         api = YouTubeTranscriptApi()
-        transcript_list = api.fetch(video_id, languages=['en', 'en-US', 'en-GB'])
+        transcript_list = api.fetch(video_id, languages=languages)
         
         # 获取字幕文本 - 使用属性访问
         full_text = ' '.join([seg.text for seg in transcript_list])
@@ -258,54 +260,97 @@ def extract_subtitle_with_api(video_id):
 
 
 def extract_subtitle_with_ytdlp(video_id):
-    """使用 yt-dlp 提取字幕（备选方案）"""
+    """使用 yt-dlp + YouTube Cookie 提取字幕（备选方案）"""
     print("🎬 正在使用 yt-dlp 提取字幕...")
-    
+
+    # 查找YouTube Cookie文件
+    cookie_file = Path.home() / ".youtube_cookies.txt"
+    if not cookie_file.exists():
+        cookie_file = Path.home() / ".cookies.youtube.txt"
+
+    # 查找yt-dlp可执行文件
+    ytdlp_paths = [
+        "/opt/homebrew/bin/yt-dlp",
+        "/usr/local/bin/yt-dlp",
+        str(Path.home() / ".deno/bin/yt-dlp"),
+    ]
+    ytdlp_cmd = None
+    for p in ytdlp_paths:
+        if Path(p).exists():
+            ytdlp_cmd = p
+            break
+    if not ytdlp_cmd:
+        print("⚠️ yt-dlp 未找到，跳过")
+        return None
+
     with tempfile.TemporaryDirectory() as tmpdir:
         cmd = [
-            "yt-dlp",
+            ytdlp_cmd,
+            "--cookies", str(cookie_file) if cookie_file.exists() else "",
             "--skip-download",
             "--write-subs",
             "--write-auto-subs",
-            "--sub-lang", "en",
-            "--sub-format", "json3",
+            "--sub-lang", "en,zh-Hans,zh-CN",
             "-o", os.path.join(tmpdir, "subtitle"),
             f"https://youtube.com/watch?v={video_id}"
         ]
-        
+        # 过滤空字符串参数
+        cmd = [c for c in cmd if c]
+
         try:
             result = subprocess.run(cmd, capture_output=True, text=True, timeout=120)
-            
+
+            # 尝试VTT格式（更通用）
+            vtt_files = list(Path(tmpdir).glob("subtitle*.vtt"))
+            if vtt_files:
+                import re as re_module
+                full_text = []
+                seen = set()
+                with open(vtt_files[0], encoding='utf-8') as f:
+                    for line in f:
+                        line = line.strip()
+                        if not line: continue
+                        if re_module.match(r'^\d{2}:\d{2}', line): continue
+                        if '-->' in line: continue
+                        c = re_module.sub(r'<[^>]+>', '', line).strip()
+                        c = re_module.sub(r'\s+', ' ', c)
+                        if c and c not in seen and len(c) > 2:
+                            seen.add(c); full_text.append(c)
+                subtitle_text = ' '.join(full_text)
+                if subtitle_text.strip():
+                    print(f"✅ 字幕提取成功 (yt-dlp VTT)，共 {len(subtitle_text)} 字符")
+                    return subtitle_text[:20000]
+
+            # 备选JSON3格式
             subtitle_files = list(Path(tmpdir).glob("subtitle*.json3"))
             if subtitle_files:
                 with open(subtitle_files[0], 'r', encoding='utf-8') as f:
                     subtitle_data = json.load(f)
-                
                 events = subtitle_data.get('events', [])
                 full_text = []
                 for event in events:
                     if 'segs' in event:
                         text_parts = [seg.get('utf8', '') for seg in event.get('segs', [])]
                         full_text.append(''.join(text_parts))
-                
                 subtitle_text = ' '.join(full_text)
                 if subtitle_text.strip():
-                    print(f"✅ 字幕提取成功 (yt-dlp)，共 {len(subtitle_text)} 字符")
+                    print(f"✅ 字幕提取成功 (yt-dlp JSON3)，共 {len(subtitle_text)} 字符")
                     return subtitle_text[:15000]
-            
+
+            print(f"⚠️ yt-dlp 未生成字幕文件 (stderr: {result.stderr[:200] if result.stderr else '无'})")
             return None
-            
+
         except Exception as e:
             print(f"⚠️ yt-dlp 提取失败: {e}")
             return None
 
 
-def extract_subtitle(video_id):
+def extract_subtitle(video_id, languages=None):
     """提取YouTube视频字幕 - 双引擎方案"""
-    print("🎬 正在提取视频字幕...")
+    print(f"🎬 正在提取视频字幕 (languages={languages or 'en/en-US/en-GB'})...")
     
     # 方案1: 使用 youtube-transcript-api (更快、更稳定)
-    subtitle = extract_subtitle_with_api(video_id)
+    subtitle = extract_subtitle_with_api(video_id, languages=languages)
     if subtitle:
         return subtitle
     

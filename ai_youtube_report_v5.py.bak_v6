@@ -310,7 +310,7 @@ def fix_incomplete_json(partial: str) -> Optional[Dict]:
 # ============================================================
 # 3. 数据获取
 # ============================================================
-def get_video_data(video_id: str) -> Dict[str, Any]:
+def get_video_data(video_id: str, subtitle_languages: Optional[list] = None) -> Dict[str, Any]:
     """获取YouTube视频数据和评论"""
     sys.path.insert(0, str(SKILL_DIR))
 
@@ -330,9 +330,9 @@ def get_video_data(video_id: str) -> Dict[str, Any]:
     video_data = yt.get_video_data(video_id)
     comments = yt.get_comments(video_id, max_results=100)
 
-    print("🎬 提取字幕...")
+    print(f"🎬 提取字幕 (languages={subtitle_languages})...")
     extractor = SubtitleExtractor()
-    subtitle = extractor.extract(video_id)
+    subtitle = extractor.extract(video_id, languages=subtitle_languages)
 
     return {
         "video_data": video_data,
@@ -612,6 +612,38 @@ def build_comment_card(c: Dict) -> str:
     </div>'''
 
 
+def parse_iso_duration(iso_str: str) -> str:
+    """解析 ISO 8601 duration (如 PT2M8S) 为中文格式 (2分08秒)"""
+    if not iso_str or iso_str == "未知":
+        return "未知"
+    try:
+        match = re.match(r"PT(?:(\d+)H)?(?:(\d+)M)?(?:(\d+)S)?", iso_str)
+        if not match:
+            return iso_str
+        h, m, s = match.groups()
+        parts = []
+        if h: parts.append(f"{int(h)}小时")
+        if m: parts.append(f"{int(m)}分")
+        if s: parts.append(f"{int(s)}秒")
+        return "".join(parts) if parts else iso_str
+    except:
+        return iso_str
+
+CATEGORY_MAP = {
+    "1": "电影与动画", "2": "汽车与车辆", "10": "音乐",
+    "15": "宠物与动物", "17": "体育", "18": "短片",
+    "19": "旅游与活动", "20": "游戏", "21": "博客",
+    "22": "搞笑", "23": "娱乐", "24": "人物与博客",
+    "25": "新闻与政治", "26": "教程", "27": "科学与技术",
+    "28": "科学与技术", "29": "非营利与社会行动",
+    "30": "电影", "31": "动漫", "32": "动作/冒险",
+    "33": "经典", "34": "喜剧", "35": "纪录片",
+    "36": "戏剧", "37": "恐怖", "38": "科幻与奇幻",
+    "39": "惊悚", "40": "短片", "41": "惊悚片",
+    "42": "家庭片", "43": "新闻", "44": "旅行与事件",
+    "45": "预告片", "46": "节目", "47": "演唱会",
+}
+
 def generate_html(video_id: str, data: Dict, analysis: Optional[Dict]) -> str:
     """从template.html生成HTML报告"""
     if not TEMPLATE_PATH.exists():
@@ -627,8 +659,11 @@ def generate_html(video_id: str, data: Dict, analysis: Optional[Dict]) -> str:
     title = snippet.get("title", "未知")
     channel = snippet.get("channelTitle", "未知")
     published = snippet.get("publishedAt", "")[:10]
-    duration = snippet.get("duration", "未知")
-    category = snippet.get("category", "教育")
+    content_details = video_data.get("contentDetails", {})
+    iso_duration = content_details.get("duration", "未知")
+    duration = parse_iso_duration(iso_duration)
+    category_id = snippet.get("categoryId", "")
+    category = CATEGORY_MAP.get(category_id, snippet.get("categoryId", "未知"))
 
     views = int(stats.get("viewCount", 0))
     likes = int(stats.get("likeCount", 0))
@@ -736,7 +771,9 @@ def generate_html(video_id: str, data: Dict, analysis: Optional[Dict]) -> str:
         "{{VIDEO_ID}}": video_id,
     }
 
-    for placeholder, value in replacements.items():
+    # 修复: 按key长度降序排列，避免子串先被短key破坏
+    # 例如: {{POSITIVE_COUNT}} 包含 {{POSITIVE_PCT}}，必须先替换长key
+    for placeholder, value in sorted(replacements.items(), key=lambda x: len(x[0]), reverse=True):
         html = html.replace(placeholder, str(value))
 
     return html
@@ -796,7 +833,7 @@ def validate_html_structure(html: str) -> tuple[bool, list]:
 # ============================================================
 # 8. 主函数
 # ============================================================
-def main(video_id: str, output_dir: Optional[str] = None) -> Optional[str]:
+def main(video_id: str, output_dir: Optional[str] = None, subtitle_languages: Optional[list] = None) -> Optional[str]:
     """生成YouTube视频分析报告"""
 
     if output_dir:
@@ -813,7 +850,7 @@ def main(video_id: str, output_dir: Optional[str] = None) -> Optional[str]:
 
     # Step 1: 获取数据
     try:
-        data = get_video_data(video_id)
+        data = get_video_data(video_id, subtitle_languages=subtitle_languages)
     except Exception as e:
         print(f"❌ 数据获取失败: {e}")
         return None
@@ -854,16 +891,17 @@ def main(video_id: str, output_dir: Optional[str] = None) -> Optional[str]:
 
 
 if __name__ == "__main__":
-    import os
+    import os, argparse
 
-    if len(sys.argv) < 2:
-        print("用法: python ai_youtube_report_v5.py <video_id> [output_dir]")
-        sys.exit(1)
-
-    vid = sys.argv[1]
-    out = sys.argv[2] if len(sys.argv) > 2 else None
-
-    result = main(vid, out)
+    parser = argparse.ArgumentParser(description="YouTube报告生成器 v5.0")
+    parser.add_argument("video_id", help="YouTube视频ID")
+    parser.add_argument("output_dir", nargs="?", default=None, help="输出目录")
+    parser.add_argument("--lang", "--subtitle-lang", dest="lang", action="append", default=None,
+                        help="字幕语言代码，如 --lang es --lang en")
+    
+    args = parser.parse_args()
+    
+    result = main(args.video_id, args.output_dir, subtitle_languages=args.lang)
     if result:
         print(f"\n🎉 完成: {result}")
         sys.exit(0)

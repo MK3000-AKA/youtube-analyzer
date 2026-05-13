@@ -125,10 +125,10 @@ class YouTubeAPI:
 class SubtitleExtractor:
     """字幕提取 - 双引擎方案：youtube-transcript-api + yt-dlp"""
     
-    def extract(self, video_id: str) -> Optional[str]:
+    def extract(self, video_id: str, languages: Optional[list] = None) -> Optional[str]:
         """提取字幕 - 优先使用API，备选yt-dlp"""
         # 方案1: 使用 youtube-transcript-api (更快、更稳定)
-        subtitle = self._extract_with_api(video_id)
+        subtitle = self._extract_with_api(video_id, languages=languages)
         if subtitle:
             return subtitle
         
@@ -141,15 +141,17 @@ class SubtitleExtractor:
         print("   ⚠️ 未能提取到字幕")
         return None
     
-    def _extract_with_api(self, video_id: str) -> Optional[str]:
+    def _extract_with_api(self, video_id: str, languages: Optional[list] = None) -> Optional[str]:
         """使用 youtube-transcript-api 提取字幕"""
+        if languages is None:
+            languages = ['en', 'en-US', 'en-GB']
         try:
             from youtube_transcript_api import YouTubeTranscriptApi
             
-            print("🎬 正在使用 youtube-transcript-api 提取字幕...")
+            print(f"🎬 正在使用 youtube-transcript-api 提取字幕 (languages={languages})...")
             
             api = YouTubeTranscriptApi()
-            transcript = api.fetch(video_id, languages=['en', 'en-US', 'en-GB'])
+            transcript = api.fetch(video_id, languages=languages)
             
             # transcript 是 FetchedTranscript 对象，每个元素是 FetchedTranscriptSnippet
             full_text = ' '.join([seg.text for seg in transcript])
