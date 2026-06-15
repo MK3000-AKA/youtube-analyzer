@@ -39,7 +39,14 @@ Thumbs.db
 # Project specific
 config.json
 .env
+*.env
+*cookies*.txt
+*cookie*.json
 *.log
+
+# Local source bundles and generated reports
+work/
+outputs/
 
 # Reports (keep examples only)
 reports/*.html
