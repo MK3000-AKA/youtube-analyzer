@@ -1,0 +1,4 @@
+interface:
+  display_name: "YouTube 视频分析"
+  short_description: "提取真实字幕和评论，生成证据分层的九模块分析报告"
+  default_prompt: "使用 $youtube-video-analyzer 分析这个 YouTube 视频并输出本地 HTML 报告。"

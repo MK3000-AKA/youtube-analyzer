@@ -12,7 +12,7 @@ long_description = readme_path.read_text(encoding='utf-8') if readme_path.exists
 
 setup(
     name="youtube-analyzer",
-    version="2.1.0",
+    version="6.1.0",
     author="MK3000-AKA",
     author_email="",
     description="YouTube视频深度分析工具 - 生成专业9模块HTML报告",
@@ -26,13 +26,12 @@ setup(
         "Topic :: Multimedia :: Video :: Analysis",
         "License :: OSI Approved :: MIT License",
         "Programming Language :: Python :: 3",
-        "Programming Language :: Python :: 3.8",
         "Programming Language :: Python :: 3.9",
         "Programming Language :: Python :: 3.10",
         "Programming Language :: Python :: 3.11",
         "Programming Language :: Python :: 3.12",
     ],
-    python_requires=">=3.8",
+    python_requires=">=3.9",
     install_requires=[
         "youtube-transcript-api>=1.2.0",  # 首选字幕提取
         "yt-dlp>=2023.12.30",             # 备选字幕提取

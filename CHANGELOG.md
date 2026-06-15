@@ -2,6 +2,15 @@
 
 ## Changelog
 
+### v6.1 (2026-06-15)
+- Added a Codex-compatible collector-first skill in `scripts/`, `agents/`, and `references/`
+- Added evidence-layer rules separating creator claims, demonstrations, comments, and external verification
+- Added explicit classification for sponsored reviews, affiliate showcases, tutorials, and cinematic demonstrations
+- Added contradiction-first comment analysis and missing-test checks
+- Added portable API key and cookie configuration without user-specific paths
+- Added subtitle collection diagnostics without exposing cookie values
+- Preserved the legacy OpenClaw v6 workflow
+
 ### v5.0 (2026-03-24)
 - 🤖 **AI调用重写**: 使用 `openclaw agent --channel feishu`（可靠），不用 `--local`
 - 🔧 **JSON截断修复**: 长输出被截断时，用正则提取关键字段（fix_incomplete_json）
